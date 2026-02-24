@@ -222,6 +222,15 @@ export function listMemories(opts?: {
 	return db.query<MemoryRow, (string | number)[]>(sql).all(...params);
 }
 
+export function listDistinctGitRemotes(): string[] {
+	const rows = db
+		.query<{ git_remote: string }, []>(
+			"SELECT DISTINCT git_remote FROM memories WHERE git_remote IS NOT NULL ORDER BY git_remote",
+		)
+		.all();
+	return rows.map((r) => r.git_remote);
+}
+
 export function countMemories(): number {
 	const row = db.query<{ count: number }, []>("SELECT COUNT(*) as count FROM memories").get();
 	return row?.count ?? 0;

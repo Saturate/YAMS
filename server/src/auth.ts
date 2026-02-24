@@ -43,17 +43,29 @@ export async function jwtMiddleware(c: Context, next: Next) {
 	return next();
 }
 
-// --- Bearer key middleware ---
+// --- Bearer key validation ---
 
-export async function bearerKeyMiddleware(c: Context, next: Next) {
-	const header = c.req.header("Authorization");
-	if (!header?.startsWith("Bearer ")) {
-		return c.json({ error: "Authorization required." }, 401);
+export interface ValidatedApiKey {
+	id: string;
+	user_id: string;
+	label: string;
+	key_prefix: string;
+	is_active: number;
+	expires_at: string | null;
+	created_at: string;
+	last_used_at: string | null;
+}
+
+export async function validateBearerKey(
+	authHeader: string | undefined,
+): Promise<{ key: ValidatedApiKey } | { error: string }> {
+	if (!authHeader?.startsWith("Bearer ")) {
+		return { error: "Authorization required." };
 	}
 
-	const token = header.slice(7);
+	const token = authHeader.slice(7);
 	if (!token.startsWith("yams_")) {
-		return c.json({ error: "Invalid API key." }, 401);
+		return { error: "Invalid API key." };
 	}
 
 	const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
@@ -61,20 +73,30 @@ export async function bearerKeyMiddleware(c: Context, next: Next) {
 
 	const key = getApiKeyByHash(hash);
 	if (!key) {
-		return c.json({ error: "Invalid API key." }, 401);
+		return { error: "Invalid API key." };
 	}
 
 	if (!key.is_active) {
-		return c.json({ error: "API key has been revoked." }, 401);
+		return { error: "API key has been revoked." };
 	}
 
 	if (key.expires_at && new Date(key.expires_at) < new Date()) {
-		return c.json({ error: "API key has expired." }, 401);
+		return { error: "API key has expired." };
 	}
 
 	updateKeyLastUsed(key.id);
-	c.set("apiKey", key);
+	return { key };
+}
 
+// --- Bearer key middleware ---
+
+export async function bearerKeyMiddleware(c: Context, next: Next) {
+	const result = await validateBearerKey(c.req.header("Authorization"));
+	if ("error" in result) {
+		return c.json({ error: result.error }, 401);
+	}
+
+	c.set("apiKey", result.key);
 	return next();
 }
 
