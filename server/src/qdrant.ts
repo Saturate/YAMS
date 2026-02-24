@@ -47,6 +47,11 @@ export async function upsertMemory(
 	});
 }
 
+export async function deletePoint(id: string): Promise<void> {
+	const qdrant = getQdrantClient();
+	await qdrant.delete(COLLECTION_NAME, { points: [id] });
+}
+
 export interface MemoryFilter {
 	git_remote?: string;
 	scope?: string;

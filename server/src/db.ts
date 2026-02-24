@@ -222,6 +222,11 @@ export function listMemories(opts?: {
 	return db.query<MemoryRow, (string | number)[]>(sql).all(...params);
 }
 
+export function deleteMemory(id: string): boolean {
+	const result = db.query("DELETE FROM memories WHERE id = ?").run(id);
+	return result.changes > 0;
+}
+
 export function listDistinctGitRemotes(): string[] {
 	const rows = db
 		.query<{ git_remote: string }, []>(

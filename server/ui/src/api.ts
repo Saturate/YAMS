@@ -67,6 +67,27 @@ export interface CreateKeyResponse {
 	expires_at: string | null;
 }
 
+export interface Memory {
+	id: string;
+	api_key_id: string;
+	git_remote: string | null;
+	scope: string;
+	summary: string;
+	metadata: string | null;
+	created_at: string;
+}
+
+export interface MemoriesResponse {
+	memories: Memory[];
+	total: number;
+}
+
+export interface StatsResponse {
+	memories: number;
+	keys: { total: number; active: number };
+	projects: number;
+}
+
 export const api = {
 	setup(username: string, password: string) {
 		return request<SetupResponse>("/setup", {
@@ -105,5 +126,36 @@ export const api = {
 			method: "DELETE",
 			headers: { Authorization: `Bearer ${token}` },
 		});
+	},
+
+	getStats(token: string) {
+		return request<StatsResponse>("/api/admin/stats", {
+			headers: { Authorization: `Bearer ${token}` },
+		});
+	},
+
+	listMemories(
+		token: string,
+		opts?: { git_remote?: string; scope?: string; limit?: number; offset?: number },
+	) {
+		const params = new URLSearchParams();
+		if (opts?.git_remote) params.set("git_remote", opts.git_remote);
+		if (opts?.scope) params.set("scope", opts.scope);
+		if (opts?.limit) params.set("limit", String(opts.limit));
+		if (opts?.offset) params.set("offset", String(opts.offset));
+		const qs = params.toString();
+		return request<MemoriesResponse>(`/api/admin/memories${qs ? `?${qs}` : ""}`, {
+			headers: { Authorization: `Bearer ${token}` },
+		});
+	},
+
+	deleteMemory(token: string, id: string) {
+		return request<{ id: string; deleted: true }>(
+			`/api/admin/memories/${encodeURIComponent(id)}`,
+			{
+				method: "DELETE",
+				headers: { Authorization: `Bearer ${token}` },
+			},
+		);
 	},
 };

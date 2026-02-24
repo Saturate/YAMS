@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { logger } from "hono/logger";
+import { admin } from "./admin.js";
 import { auth, keys } from "./auth.js";
 import { ingest } from "./ingest.js";
 import { mountMcp } from "./mcp.js";
@@ -16,6 +17,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/setup", setup);
 app.route("/api/auth", auth);
 app.route("/api/keys", keys);
+app.route("/api/admin", admin);
 
 app.route("/ingest", ingest);
 mountMcp(app);
