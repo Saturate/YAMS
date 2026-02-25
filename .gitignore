@@ -5,3 +5,5 @@ server/data/
 *.db-shm
 dist/
 server/ui/dist/
+*.tsbuildinfo
+.env

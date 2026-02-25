@@ -1,0 +1,14 @@
+node_modules/
+server/node_modules/
+server/ui/node_modules/
+server/ui/dist/
+server/data/
+*.db
+*.db-wal
+*.db-shm
+.git/
+.claude/
+website/
+**/*.test.ts
+server/seed.sh
+PLAN.md
