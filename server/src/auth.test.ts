@@ -12,7 +12,7 @@ describe("auth", () => {
 			body: JSON.stringify({ username: "admin", password: "password123" }),
 		});
 		expect(res.status).toBe(200);
-		const body = await res.json<{ username: string }>();
+		const body = (await res.json()) as { username: string };
 		expect(body.username).toBe("admin");
 		const cookie = res.headers.get("set-cookie") ?? "";
 		expect(cookie).toContain("yams_session=");
@@ -28,7 +28,7 @@ describe("auth", () => {
 			body: JSON.stringify({ username: "admin", password: "wrongpassword" }),
 		});
 		expect(res.status).toBe(401);
-		const body = await res.json<{ error: string }>();
+		const body = (await res.json()) as { error: string };
 		expect(body.error).toBe("Invalid credentials.");
 	});
 
@@ -42,7 +42,7 @@ describe("auth", () => {
 			body: JSON.stringify({ username: "nobody", password: "password123" }),
 		});
 		expect(res.status).toBe(401);
-		const body = await res.json<{ error: string }>();
+		const body = (await res.json()) as { error: string };
 		// Same message as wrong password to prevent enumeration
 		expect(body.error).toBe("Invalid credentials.");
 	});

@@ -43,6 +43,12 @@ setup.post("/", async (c) => {
 	}
 
 	const hash = await Bun.password.hash(password);
+
+	// Re-check atomically after async hash to prevent TOCTOU race
+	if (getUserCount() > 0) {
+		return c.json({ error: "Setup already completed." }, 403);
+	}
+
 	const id = createUser(username, hash);
 
 	return c.json({ id, username }, 201);

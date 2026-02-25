@@ -1,3 +1,4 @@
+import { getLogger } from "@logtape/logtape";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Hono } from "hono";
@@ -8,6 +9,8 @@ import { listDistinctGitRemotes } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import { StoreMemoryError, storeMemory } from "./ingest.js";
 import { searchMemories } from "./qdrant.js";
+
+const log = getLogger(["yams", "mcp"]);
 
 function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 	const server = new McpServer({
@@ -32,12 +35,13 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			try {
 				vector = await provider.embed(args.query);
 			} catch (err) {
+				if (err instanceof Error) log.error("Embed failed: {error}", { error: err.message });
 				return {
 					isError: true,
 					content: [
 						{
 							type: "text" as const,
-							text: `Embedding error: ${err instanceof Error ? err.message : "Unknown error"}`,
+							text: "Embedding service unavailable.",
 						},
 					],
 				};
@@ -52,7 +56,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 
 				const memories = results.map((r) => ({
 					score: r.score,
-					...(r.payload as Record<string, unknown>),
+					...(r.payload ?? {}),
 				}));
 
 				return {
@@ -64,12 +68,13 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					],
 				};
 			} catch (err) {
+				if (err instanceof Error) log.error("Search failed: {error}", { error: err.message });
 				return {
 					isError: true,
 					content: [
 						{
 							type: "text" as const,
-							text: `Search error: ${err instanceof Error ? err.message : "Unknown error"}`,
+							text: "Search service unavailable.",
 						},
 					],
 				};
@@ -120,12 +125,13 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 						],
 					};
 				}
+				if (err instanceof Error) log.error("Store failed: {error}", { error: err.message });
 				return {
 					isError: true,
 					content: [
 						{
 							type: "text" as const,
-							text: `Failed to store memory: ${err instanceof Error ? err.message : "Unknown error"}`,
+							text: "Failed to store memory.",
 						},
 					],
 				};

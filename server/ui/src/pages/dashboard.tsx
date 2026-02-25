@@ -112,6 +112,7 @@ export function DashboardPage() {
 				<CardContent>
 					<form onSubmit={handleSearch} className="flex items-center gap-2">
 						<Input
+							aria-label="Search memories"
 							placeholder="What do you remember about..."
 							value={query}
 							onChange={(e) => setQuery(e.target.value)}

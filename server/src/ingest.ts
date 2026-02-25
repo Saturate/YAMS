@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { bearerKeyMiddleware } from "./auth.js";
 import { createMemory } from "./db.js";
 import { getProvider } from "./embeddings.js";
+import type { AppEnv } from "./env.js";
 import { upsertMemory } from "./qdrant.js";
 
 const VALID_SCOPES = ["session", "project", "global"] as const;
@@ -94,7 +95,7 @@ interface IngestBody {
 	metadata?: Record<string, unknown>;
 }
 
-const ingest = new Hono();
+const ingest = new Hono<AppEnv>();
 
 ingest.use("*", bearerKeyMiddleware);
 
@@ -105,8 +106,11 @@ ingest.post("/", async (c) => {
 	if (!summary) {
 		return c.json({ error: "Summary is required." }, 400);
 	}
+	if (summary.length > 10_000) {
+		return c.json({ error: "Summary must be 10,000 characters or fewer." }, 400);
+	}
 
-	const apiKey = c.get("apiKey") as { id: string; label: string };
+	const apiKey = c.get("apiKey");
 
 	try {
 		const result = await storeMemory({

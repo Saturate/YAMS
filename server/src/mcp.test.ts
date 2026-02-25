@@ -47,7 +47,7 @@ async function createApiKey(app: ReturnType<typeof createTestApp>) {
 		},
 		body: JSON.stringify({ label: "mcp-test" }),
 	});
-	const body = await res.json<{ key: string }>();
+	const body = (await res.json()) as { key: string };
 	return body.key;
 }
 
@@ -90,7 +90,7 @@ async function mcpInitialize(
 			id: 1,
 		}),
 	});
-	return res.json<JsonRpcResponse>();
+	return (await res.json()) as JsonRpcResponse;
 }
 
 async function mcpCallTool(
@@ -112,7 +112,7 @@ async function mcpCallTool(
 			id: 2,
 		}),
 	});
-	return res.json<JsonRpcResponse>();
+	return (await res.json()) as JsonRpcResponse;
 }
 
 describe("MCP server", () => {
@@ -301,6 +301,6 @@ describe("MCP server", () => {
 		const data = await mcpCallTool(app, apiKey, "search", { query: "test" });
 
 		expect(data.result?.isError).toBe(true);
-		expect(data.result?.content?.[0]?.text).toContain("Embedding error");
+		expect(data.result?.content?.[0]?.text).toContain("Embedding service unavailable");
 	});
 });

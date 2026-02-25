@@ -15,14 +15,14 @@ describe("keys/me", () => {
 			},
 			body: JSON.stringify({ label: "my-agent" }),
 		});
-		const { key } = await createRes.json<{ key: string }>();
+		const { key } = (await createRes.json()) as { key: string };
 
 		const meRes = await app.request("/api/keys/me", {
 			method: "GET",
 			headers: { Authorization: `Bearer ${key}` },
 		});
 		expect(meRes.status).toBe(200);
-		const body = await meRes.json<{ label: string; is_active: boolean }>();
+		const body = (await meRes.json()) as { label: string; is_active: boolean };
 		expect(body.label).toBe("my-agent");
 		expect(body.is_active).toBe(true);
 	});
@@ -59,7 +59,7 @@ describe("keys/me", () => {
 			},
 			body: JSON.stringify({ label: "will-revoke" }),
 		});
-		const { id, key } = await createRes.json<{ id: string; key: string }>();
+		const { id, key } = (await createRes.json()) as { id: string; key: string };
 
 		await app.request(`/api/keys/${id}`, {
 			method: "DELETE",

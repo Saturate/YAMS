@@ -12,8 +12,10 @@ describe("setup", () => {
 		const app = createTestApp();
 		const res = await app.request("/health");
 		expect(res.status).toBe(200);
-		const body = await res.json();
-		expect(body).toEqual({ status: "ok" });
+		const body = (await res.json()) as { status: string; checks: Record<string, string> };
+		expect(body.status).toBe("ok");
+		expect(body.checks.database).toBe("ok");
+		expect(body.checks.server).toBe("ok");
 	});
 
 	test("GET /setup passes through to SPA", async () => {
@@ -31,7 +33,7 @@ describe("setup", () => {
 			body: JSON.stringify({ username: "admin", password: "password123" }),
 		});
 		expect(res.status).toBe(201);
-		const body = await res.json<{ id: string; username: string }>();
+		const body = (await res.json()) as { id: string; username: string };
 		expect(body.username).toBe("admin");
 		expect(body.id).toBeDefined();
 	});

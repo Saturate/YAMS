@@ -85,10 +85,11 @@ export function MemoriesPage() {
 
 			<div className="mb-4 flex flex-wrap items-end gap-3">
 				<div className="space-y-1">
-					{/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Select handles a11y */}
-					<label className="text-xs text-muted-foreground">Project</label>
+					<span id="project-filter-label" className="text-xs text-muted-foreground">
+						Project
+					</span>
 					<Select value={selectedRemote} onValueChange={handleRemoteChange}>
-						<SelectTrigger className="w-64">
+						<SelectTrigger className="w-64" aria-labelledby="project-filter-label">
 							<SelectValue placeholder="All projects" />
 						</SelectTrigger>
 						<SelectContent>
@@ -102,10 +103,11 @@ export function MemoriesPage() {
 					</Select>
 				</div>
 				<div className="space-y-1">
-					{/* biome-ignore lint/a11y/noLabelWithoutControl: Radix Select handles a11y */}
-					<label className="text-xs text-muted-foreground">Scope</label>
+					<span id="scope-filter-label" className="text-xs text-muted-foreground">
+						Scope
+					</span>
 					<Select value={selectedScope} onValueChange={handleScopeChange}>
-						<SelectTrigger className="w-40">
+						<SelectTrigger className="w-40" aria-labelledby="scope-filter-label">
 							<SelectValue placeholder="All scopes" />
 						</SelectTrigger>
 						<SelectContent>
@@ -165,6 +167,7 @@ export function MemoriesPage() {
 										<Button
 											size="icon"
 											variant="ghost"
+											aria-label="Delete memory"
 											disabled={deleteMutation.isPending}
 											onClick={() => deleteMutation.mutate(m.id)}
 										>
@@ -181,6 +184,7 @@ export function MemoriesPage() {
 							<Button
 								size="sm"
 								variant="outline"
+								aria-label="Previous page"
 								disabled={page === 0}
 								onClick={() => setPage((p) => p - 1)}
 							>
@@ -192,6 +196,7 @@ export function MemoriesPage() {
 							<Button
 								size="sm"
 								variant="outline"
+								aria-label="Next page"
 								disabled={page >= totalPages - 1}
 								onClick={() => setPage((p) => p + 1)}
 							>

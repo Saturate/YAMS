@@ -1,8 +1,10 @@
 import { app } from "./app.js";
 import { initDb } from "./db.js";
+import { resetRateLimiters } from "./rate-limit.js";
 
 export function createTestApp() {
 	initDb(":memory:");
+	resetRateLimiters();
 	return app;
 }
 
@@ -16,7 +18,7 @@ export async function setupAdmin(
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ username, password }),
 	});
-	return res.json<{ id: string; username: string }>();
+	return (await res.json()) as { id: string; username: string };
 }
 
 export async function getToken(testApp: typeof app, username = "admin", password = "password123") {

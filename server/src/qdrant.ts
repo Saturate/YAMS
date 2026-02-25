@@ -1,5 +1,7 @@
+import { getLogger } from "@logtape/logtape";
 import { QdrantClient } from "@qdrant/js-client-rest";
 
+const log = getLogger(["yams", "qdrant"]);
 const COLLECTION_NAME = "yams_memories";
 
 let client: QdrantClient | null = null;
@@ -24,11 +26,15 @@ export async function initQdrant(dimensions?: number): Promise<void> {
 		await client.createCollection(COLLECTION_NAME, {
 			vectors: { size: dims, distance: "Cosine" },
 		});
-		console.log(`Created Qdrant collection "${COLLECTION_NAME}" (${dims} dimensions)`);
+		log.info("Created collection {collection} ({dims} dimensions)", {
+			collection: COLLECTION_NAME,
+			dims,
+		});
 	}
 }
 
 export interface MemoryPayload {
+	[key: string]: unknown;
 	memory_id: string;
 	git_remote: string | null;
 	scope: string;

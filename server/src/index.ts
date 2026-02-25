@@ -1,24 +1,31 @@
+import { getLogger } from "@logtape/logtape";
 import { app } from "./app.js";
 import { getUserCount, initDb } from "./db.js";
 import { checkOllamaModel } from "./embeddings.js";
+import { initLogging } from "./logger.js";
 import { initQdrant } from "./qdrant.js";
+
+await initLogging();
 
 initDb();
 
+const log = getLogger(["yams", "server"]);
 const port = Number(process.env.YAMS_PORT) || 3000;
 const userCount = getUserCount();
 
-console.log(`YAMS server starting on port ${port}`);
+log.info("Starting on port {port}", { port });
 if (userCount === 0) {
-	console.log("No users found — visit http://localhost:%d/setup to create an admin", port);
+	log.info("No users found — visit http://localhost:{port}/setup to create an admin", { port });
 } else {
-	console.log("Ready (%d user(s) configured)", userCount);
+	log.info("Ready ({userCount} user(s) configured)", { userCount });
 }
 
 initQdrant()
-	.then(() => console.log("Qdrant connected"))
-	.catch((err) =>
-		console.log("Qdrant not available — ingest will fail until it's running:", err.message),
+	.then(() => log.info("Qdrant connected"))
+	.catch((err: unknown) =>
+		log.warn("Qdrant not available — ingest will fail until it's running: {error}", {
+			error: err instanceof Error ? err.message : String(err),
+		}),
 	);
 
 checkOllamaModel();

@@ -42,12 +42,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
 	return (
 		<div className="min-h-svh">
+			<a
+				href="#main-content"
+				className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:rounded focus:bg-background focus:px-4 focus:py-2 focus:text-foreground focus:shadow-lg"
+			>
+				Skip to content
+			</a>
 			<header className="border-b">
 				<div className="mx-auto flex h-14 max-w-5xl items-center gap-6 px-4">
 					<h1 className="text-lg font-semibold" title={acronym}>
 						YAMS
 					</h1>
-					<nav className="flex gap-1">
+					<nav aria-label="Main navigation" className="flex gap-1">
 						{NAV_ITEMS.map((item) => (
 							<Button
 								key={item.to}
@@ -67,7 +73,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
 					</div>
 				</div>
 			</header>
-			<main className="mx-auto max-w-5xl px-4 py-6">{children}</main>
+			<main id="main-content" className="mx-auto max-w-5xl px-4 py-6">
+				{children}
+			</main>
 		</div>
 	);
 }

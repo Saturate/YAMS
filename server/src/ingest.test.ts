@@ -29,7 +29,7 @@ async function createApiKey(app: ReturnType<typeof createTestApp>) {
 		},
 		body: JSON.stringify({ label: "ingest-test" }),
 	});
-	const body = await res.json<{ key: string }>();
+	const body = (await res.json()) as { key: string };
 	return body.key;
 }
 
@@ -65,13 +65,13 @@ describe("POST /ingest", () => {
 		});
 
 		expect(res.status).toBe(201);
-		const body = await res.json<{
+		const body = (await res.json()) as {
 			id: string;
 			summary: string;
 			scope: string;
 			git_remote: string;
 			created_at: string;
-		}>();
+		};
 		expect(body.id).toBeDefined();
 		expect(body.summary).toBe("Refactored auth middleware");
 		expect(body.scope).toBe("session");
@@ -99,7 +99,7 @@ describe("POST /ingest", () => {
 		});
 
 		expect(res.status).toBe(400);
-		const body = await res.json<{ error: string }>();
+		const body = (await res.json()) as { error: string };
 		expect(body.error).toContain("Summary");
 	});
 
@@ -130,7 +130,7 @@ describe("POST /ingest", () => {
 			},
 			body: JSON.stringify({ label: "to-revoke" }),
 		});
-		const { id, key } = await createRes.json<{ id: string; key: string }>();
+		const { id, key } = (await createRes.json()) as { id: string; key: string };
 
 		await app.request(`/api/keys/${id}`, {
 			method: "DELETE",
@@ -164,7 +164,7 @@ describe("POST /ingest", () => {
 		});
 
 		expect(res.status).toBe(201);
-		const body = await res.json<{ scope: string }>();
+		const body = (await res.json()) as { scope: string };
 		expect(body.scope).toBe("session");
 	});
 
@@ -186,7 +186,7 @@ describe("POST /ingest", () => {
 		});
 
 		expect(res.status).toBe(201);
-		const body = await res.json<{ id: string }>();
+		const body = (await res.json()) as { id: string };
 		const memory = getMemory(body.id);
 		expect(memory).toBeDefined();
 		expect(memory?.metadata).toBeDefined();
@@ -258,7 +258,7 @@ describe("POST /ingest", () => {
 		});
 
 		expect(res.status).toBe(400);
-		const body = await res.json<{ error: string }>();
+		const body = (await res.json()) as { error: string };
 		expect(body.error).toContain("scope");
 	});
 
@@ -284,7 +284,7 @@ describe("POST /ingest", () => {
 		});
 
 		expect(res.status).toBe(502);
-		const body = await res.json<{ error: string }>();
+		const body = (await res.json()) as { error: string };
 		expect(body.error).toContain("Embedding provider");
 	});
 });

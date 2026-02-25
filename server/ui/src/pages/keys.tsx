@@ -148,7 +148,12 @@ export function KeysPage() {
 								<code className="flex-1 rounded-md bg-muted px-3 py-2 text-sm break-all">
 									{createdKey.key}
 								</code>
-								<Button size="icon" variant="outline" onClick={() => handleCopy(createdKey.key)}>
+								<Button
+									size="icon"
+									variant="outline"
+									aria-label="Copy API key to clipboard"
+									onClick={() => handleCopy(createdKey.key)}
+								>
 									<Copy className="h-4 w-4" />
 								</Button>
 							</div>
@@ -211,6 +216,7 @@ export function KeysPage() {
 											<Button
 												size="icon"
 												variant="ghost"
+												aria-label={`Revoke key ${key.label}`}
 												disabled={revokeMutation.isPending}
 												onClick={() => revokeMutation.mutate(key.id)}
 											>

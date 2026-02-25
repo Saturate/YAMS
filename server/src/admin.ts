@@ -1,3 +1,4 @@
+import { getLogger } from "@logtape/logtape";
 import { Hono } from "hono";
 import { jwtMiddleware } from "./auth.js";
 import {
@@ -10,9 +11,12 @@ import {
 } from "./db.js";
 import { listApiKeys } from "./db.js";
 import { getProvider } from "./embeddings.js";
+import type { AppEnv } from "./env.js";
 import { deletePoint, searchMemories } from "./qdrant.js";
 
-const admin = new Hono();
+const log = getLogger(["yams", "admin"]);
+
+const admin = new Hono<AppEnv>();
 
 admin.use("*", jwtMiddleware);
 
@@ -69,18 +73,18 @@ admin.post("/search", async (c) => {
 		);
 
 		// Enrich with full memory data from SQLite
-		const memories = results.map((r) => {
-			const memory = getMemory(r.id as string);
-			return {
-				score: r.score,
-				...memory,
-			};
-		});
+		const memories = results
+			.map((r) => {
+				const memory = getMemory(String(r.id));
+				if (!memory) return null;
+				return { score: r.score, ...memory };
+			})
+			.filter((m) => m !== null);
 
 		return c.json({ results: memories });
 	} catch (err) {
-		const message = err instanceof Error ? err.message : "Search failed.";
-		return c.json({ error: message }, 502);
+		if (err instanceof Error) log.error("Search failed: {error}", { error: err.message });
+		return c.json({ error: "Search service unavailable." }, 502);
 	}
 });
 
@@ -89,8 +93,8 @@ admin.post("/search", async (c) => {
 admin.get("/memories", (c) => {
 	const gitRemote = c.req.query("git_remote");
 	const scope = c.req.query("scope");
-	const limit = Number(c.req.query("limit")) || 50;
-	const offset = Number(c.req.query("offset")) || 0;
+	const limit = Math.min(Math.max(Number(c.req.query("limit")) || 50, 1), 200);
+	const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
 
 	const memories = listMemories({ gitRemote, scope, limit, offset });
 	const total = countMemories({ gitRemote, scope });
@@ -110,8 +114,11 @@ admin.delete("/memories/:id", async (c) => {
 
 	try {
 		await deletePoint(id);
-	} catch {
-		// Qdrant might be down — SQLite deletion is still valid
+	} catch (err) {
+		log.warn("Qdrant delete failed for {id}: {error}", {
+			id,
+			error: err instanceof Error ? err.message : String(err),
+		});
 	}
 
 	return c.json({ id, deleted: true });

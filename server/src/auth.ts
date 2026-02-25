@@ -12,6 +12,10 @@ import {
 	revokeApiKey,
 	updateKeyLastUsed,
 } from "./db.js";
+import type { AppEnv } from "./env.js";
+
+export type { ValidatedApiKey } from "./env.js";
+export type { AppEnv } from "./env.js";
 
 const COOKIE_NAME = "yams_session";
 
@@ -22,7 +26,7 @@ function getSecretKey(): Uint8Array {
 
 // --- JWT middleware ---
 
-export async function jwtMiddleware(c: Context, next: Next) {
+export async function jwtMiddleware(c: Context<AppEnv>, next: Next) {
 	// Check cookie first, then Authorization header
 	const cookieToken = getCookie(c, COOKIE_NAME);
 	const header = c.req.header("Authorization");
@@ -34,8 +38,8 @@ export async function jwtMiddleware(c: Context, next: Next) {
 
 	try {
 		const { payload } = await jwtVerify(token, getSecretKey(), { issuer: "yams" });
-		c.set("userId", payload.sub);
-		c.set("username", payload.username);
+		c.set("userId", payload.sub as string);
+		c.set("username", payload.username as string);
 	} catch {
 		return c.json({ error: "Invalid or expired token." }, 401);
 	}
@@ -45,20 +49,9 @@ export async function jwtMiddleware(c: Context, next: Next) {
 
 // --- Bearer key validation ---
 
-export interface ValidatedApiKey {
-	id: string;
-	user_id: string;
-	label: string;
-	key_prefix: string;
-	is_active: number;
-	expires_at: string | null;
-	created_at: string;
-	last_used_at: string | null;
-}
-
 export async function validateBearerKey(
 	authHeader: string | undefined,
-): Promise<{ key: ValidatedApiKey } | { error: string }> {
+): Promise<{ key: import("./env.js").ValidatedApiKey } | { error: string }> {
 	if (!authHeader?.startsWith("Bearer ")) {
 		return { error: "Authorization required." };
 	}
@@ -90,7 +83,7 @@ export async function validateBearerKey(
 
 // --- Bearer key middleware ---
 
-export async function bearerKeyMiddleware(c: Context, next: Next) {
+export async function bearerKeyMiddleware(c: Context<AppEnv>, next: Next) {
 	const result = await validateBearerKey(c.req.header("Authorization"));
 	if ("error" in result) {
 		return c.json({ error: result.error }, 401);
@@ -102,7 +95,7 @@ export async function bearerKeyMiddleware(c: Context, next: Next) {
 
 // --- Auth routes (login) ---
 
-const auth = new Hono();
+const auth = new Hono<AppEnv>();
 
 auth.post("/login", async (c) => {
 	const body = await c.req.json<{ username?: string; password?: string }>();
@@ -135,6 +128,7 @@ auth.post("/login", async (c) => {
 		sameSite: "Strict",
 		path: "/",
 		maxAge: 60 * 60 * 24,
+		secure: process.env.NODE_ENV === "production",
 	});
 
 	return c.json({ username: user.username });
@@ -153,7 +147,7 @@ auth.get("/me", jwtMiddleware, (c) => {
 
 // --- Key management routes (JWT-protected) ---
 
-const keys = new Hono();
+const keys = new Hono<AppEnv>();
 
 keys.use("/*", async (c, next) => {
 	const path = new URL(c.req.url).pathname;
@@ -184,22 +178,14 @@ keys.post("/", async (c) => {
 		expiresAt = new Date(Date.now() + body.expires_in * 1000).toISOString();
 	}
 
-	const userId = c.get("userId") as string;
+	const userId = c.get("userId");
 	const id = createApiKey({ userId, label, keyHash, keyPrefix, expiresAt });
 
 	return c.json({ id, key: rawKey, label, key_prefix: keyPrefix, expires_at: expiresAt }, 201);
 });
 
 keys.get("/me", (c) => {
-	const key = c.get("apiKey") as {
-		id: string;
-		label: string;
-		key_prefix: string;
-		is_active: number;
-		expires_at: string | null;
-		created_at: string;
-		last_used_at: string | null;
-	};
+	const key = c.get("apiKey");
 	return c.json({
 		id: key.id,
 		label: key.label,
@@ -212,9 +198,10 @@ keys.get("/me", (c) => {
 });
 
 keys.get("/", (c) => {
-	const allKeys = listApiKeys();
+	const userId = c.get("userId");
+	const userKeys = listApiKeys(userId);
 	return c.json(
-		allKeys.map((k) => ({
+		userKeys.map((k) => ({
 			id: k.id,
 			label: k.label,
 			key_prefix: k.key_prefix,
@@ -230,7 +217,7 @@ keys.delete("/:id", (c) => {
 	const id = c.req.param("id");
 	const existing = getApiKeyById(id);
 
-	if (!existing) {
+	if (!existing || existing.user_id !== c.get("userId")) {
 		return c.json({ error: "Key not found." }, 404);
 	}
 

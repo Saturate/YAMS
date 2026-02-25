@@ -1,3 +1,7 @@
+import { getLogger } from "@logtape/logtape";
+
+const log = getLogger(["yams", "embeddings"]);
+
 export interface EmbeddingProvider {
 	embed(text: string): Promise<number[]>;
 	readonly dimensions: number;
@@ -75,10 +79,11 @@ export async function checkOllamaModel(): Promise<void> {
 		const hasModel = models.some((m) => m.name === model || m.name.startsWith(`${model}:`));
 
 		if (!hasModel) {
-			console.log(`Ollama is running but model "${model}" is not pulled yet.`);
-			console.log(`  Run: ollama pull ${model}`);
+			log.warn("Ollama model {model} is not pulled yet — run: ollama pull {model}", { model });
 		}
 	} catch {
-		console.log("Ollama is not reachable at %s — embeddings will fail until it's running", url);
+		log.warn("Ollama is not reachable at {url} — embeddings will fail until it's running", {
+			url,
+		});
 	}
 }

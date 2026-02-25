@@ -16,7 +16,7 @@ describe("keys", () => {
 			body: JSON.stringify({ label: "test-key" }),
 		});
 		expect(res.status).toBe(201);
-		const body = await res.json<{ id: string; key: string; label: string }>();
+		const body = (await res.json()) as { id: string; key: string; label: string };
 		expect(body.key).toStartWith("yams_");
 		expect(body.label).toBe("test-key");
 	});
@@ -65,7 +65,7 @@ describe("keys", () => {
 			headers: { Authorization: `Bearer ${token}` },
 		});
 		expect(res.status).toBe(200);
-		const body = await res.json<Record<string, unknown>[]>();
+		const body = (await res.json()) as Record<string, unknown>[];
 		expect(body).toHaveLength(2);
 		// key_hash should never be exposed
 		for (const k of body) {
@@ -86,14 +86,14 @@ describe("keys", () => {
 			},
 			body: JSON.stringify({ label: "to-revoke" }),
 		});
-		const { id, key } = await createRes.json<{ id: string; key: string }>();
+		const { id, key } = (await createRes.json()) as { id: string; key: string };
 
 		const revokeRes = await app.request(`/api/keys/${id}`, {
 			method: "DELETE",
 			headers: { Authorization: `Bearer ${token}` },
 		});
 		expect(revokeRes.status).toBe(200);
-		const body = await revokeRes.json<{ revoked: boolean }>();
+		const body = (await revokeRes.json()) as { revoked: boolean };
 		expect(body.revoked).toBe(true);
 
 		// Revoked key should be rejected on /api/keys/me
@@ -120,7 +120,7 @@ describe("keys", () => {
 		});
 
 		// expires_in: -1 will create a key already expired
-		const { key } = await createRes.json<{ key: string }>();
+		const { key } = (await createRes.json()) as { key: string };
 
 		const meRes = await app.request("/api/keys/me", {
 			method: "GET",

@@ -9,7 +9,7 @@ export function getDb(): Database {
 }
 
 export function initDb(path?: string): Database {
-	const dbPath = path ?? "data/yams.db";
+	const dbPath = path ?? process.env.YAMS_DB_PATH ?? "data/yams.db";
 
 	if (dbPath !== ":memory:") {
 		mkdirSync(dirname(dbPath), { recursive: true });
@@ -46,15 +46,6 @@ export function initDb(path?: string): Database {
 			expires_at TEXT,
 			created_at TEXT NOT NULL DEFAULT (datetime('now')),
 			last_used_at TEXT
-		)
-	`);
-
-	db.run(`
-		CREATE TABLE IF NOT EXISTS sessions (
-			id TEXT PRIMARY KEY,
-			user_id TEXT NOT NULL REFERENCES users(id),
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
-			expires_at TEXT NOT NULL
 		)
 	`);
 
@@ -136,7 +127,14 @@ export function getApiKeyById(id: string) {
 	return db.query<ApiKeyRow, [string]>("SELECT * FROM api_keys WHERE id = ?").get(id);
 }
 
-export function listApiKeys() {
+export function listApiKeys(userId?: string) {
+	if (userId) {
+		return db
+			.query<Omit<ApiKeyRow, "key_hash">, [string]>(
+				"SELECT id, user_id, label, key_prefix, is_active, expires_at, created_at, last_used_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
+			)
+			.all(userId);
+	}
 	return db
 		.query<Omit<ApiKeyRow, "key_hash">, []>(
 			"SELECT id, user_id, label, key_prefix, is_active, expires_at, created_at, last_used_at FROM api_keys ORDER BY created_at DESC",
