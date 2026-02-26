@@ -58,6 +58,7 @@ mountMcp(app);
 
 // Serve built UI static assets
 app.use("/assets/*", serveStatic({ root: "./ui/dist" }));
+app.use("/favicon.svg", serveStatic({ root: "./ui/dist", path: "favicon.svg" }));
 
 // SPA fallback - serve index.html for all non-API routes
 app.get("*", serveStatic({ root: "./ui/dist", path: "index.html" }));
