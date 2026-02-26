@@ -32,7 +32,7 @@ RUN bun install --frozen-lockfile --production
 # ── Stage 3: Production (Alpine) ─────────────────────────────
 FROM oven/bun:1-alpine
 
-RUN addgroup -S yams && adduser -S yams -G yams
+RUN addgroup -S yams && adduser -S yams -G yams && apk add --no-cache su-exec
 
 WORKDIR /app/server
 
@@ -54,7 +54,7 @@ COPY --from=build /app/server/ui/dist ./ui/dist
 # SQLite data volume
 RUN mkdir -p /data && chown yams:yams /data
 
-USER yams
+COPY docker-entrypoint.sh /usr/local/bin/
 
 ENV YAMS_DB_PATH=/data/yams.db
 ENV YAMS_PORT=3000
@@ -64,4 +64,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
   CMD bun -e "const r = await fetch('http://localhost:3000/health'); if (!r.ok) process.exit(1)" || exit 1
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["bun", "run", "src/index.ts"]
