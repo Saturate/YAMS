@@ -1,6 +1,10 @@
 # 🍠 YAMS
 
-**Your AI Memory System** - nutritious context for your AI
+- **Y**our **A**I **M**emory **S**ystem
+- **Y**et **A**nother **M**emory **S**tore
+- ...you get the idea
+
+Nutritious context for your AI.
 
 Self-hosted memory layer for AI coding assistants. Captures what you work on, remembers cross-project patterns, and surfaces relevant context - across all your machines and tools.
 
