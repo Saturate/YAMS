@@ -8,7 +8,9 @@ Nutritious context for your AI.
 
 Self-hosted memory layer for AI coding assistants. Captures what you work on, remembers cross-project patterns, and surfaces relevant context - across all your machines and tools.
 
-![YAMS demo](demo.gif)
+<p align="center">
+  <img src="demo.gif" alt="YAMS demo" width="640">
+</p>
 
 ## Quick start
 
