@@ -14,6 +14,9 @@ export async function initLogging(): Promise<void> {
 				formatter: isDev ? ansiColorFormatter : jsonLinesFormatter,
 			}),
 		},
-		loggers: [{ category: ["yams"], sinks: ["console"], lowestLevel: "info" }],
+		loggers: [
+			{ category: ["logtape", "meta"], sinks: ["console"], lowestLevel: "warning" },
+			{ category: ["yams"], sinks: ["console"], lowestLevel: "info" },
+		],
 	});
 }

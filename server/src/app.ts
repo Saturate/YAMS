@@ -3,7 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
-import { secureHeaders } from "hono/secure-headers";
+import { NONCE, secureHeaders } from "hono/secure-headers";
 import { admin } from "./admin.js";
 import { auth, keys } from "./auth.js";
 import { getDb } from "./db.js";
@@ -18,7 +18,22 @@ const log = getLogger(["yams", "server"]);
 const app = new Hono();
 
 app.use("*", honoLogger({ category: ["yams", "http"] }));
-app.use("*", secureHeaders());
+app.use(
+	"*",
+	secureHeaders({
+		contentSecurityPolicy: {
+			defaultSrc: ["'self'"],
+			scriptSrc: ["'self'", NONCE],
+			styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+			fontSrc: ["'self'", "https://fonts.gstatic.com"],
+			imgSrc: ["'self'", "data:"],
+			connectSrc: ["'self'"],
+			frameAncestors: ["'none'"],
+			baseUri: ["'self'"],
+			formAction: ["'self'"],
+		},
+	}),
+);
 app.use("*", bodyLimit({ maxSize: 1024 * 1024 }));
 app.use("*", setupGuard());
 
@@ -60,8 +75,17 @@ mountMcp(app);
 app.use("/assets/*", serveStatic({ root: "./ui/dist" }));
 app.use("/favicon.svg", serveStatic({ root: "./ui/dist", path: "favicon.svg" }));
 
-// SPA fallback - serve index.html for all non-API routes
-app.get("*", serveStatic({ root: "./ui/dist", path: "index.html" }));
+// SPA fallback - serve index.html with nonce injected into script tags
+app.get("*", async (c) => {
+	try {
+		const html = await Bun.file("./ui/dist/index.html").text();
+		const nonce = c.get("secureHeadersNonce");
+		const nonced = html.replace(/<script /g, `<script nonce="${nonce}" `);
+		return c.html(nonced);
+	} catch {
+		return c.notFound();
+	}
+});
 
 app.onError((err, c) => {
 	if (err instanceof SyntaxError && err.message.includes("JSON")) {
