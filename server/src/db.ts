@@ -747,6 +747,23 @@ export function createObservation(params: {
 	return id;
 }
 
+export function getObservation(id: string): ObservationRow | undefined {
+	return (
+		db.query<ObservationRow, [string]>("SELECT * FROM observations WHERE id = ?").get(id) ??
+		undefined
+	);
+}
+
+export function getObservationForUser(id: string, userId: string): ObservationRow | undefined {
+	return (
+		db
+			.query<ObservationRow, [string, string]>(
+				"SELECT o.* FROM observations o JOIN sessions s ON o.session_id = s.id JOIN api_keys k ON s.api_key_id = k.id WHERE o.id = ? AND k.user_id = ?",
+			)
+			.get(id, userId) ?? undefined
+	);
+}
+
 export function listObservations(sessionId: string): ObservationRow[] {
 	return db
 		.query<ObservationRow, [string]>(

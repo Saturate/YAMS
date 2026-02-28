@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { getMemory } from "./db.js";
+import { createObservation, createSession, getMemory } from "./db.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { setProvider } from "./embeddings.js";
 import { estimateTokens } from "./mcp.js";
@@ -38,8 +38,8 @@ const mockQdrantClient = {
 	search: mockSearch,
 } as unknown as import("@qdrant/js-client-rest").QdrantClient;
 
-async function createApiKey(app: ReturnType<typeof createTestApp>) {
-	const token = await getToken(app);
+async function createApiKey(app: ReturnType<typeof createTestApp>, jwtToken?: string) {
+	const token = jwtToken ?? (await getToken(app));
 	const res = await app.request("/api/keys", {
 		method: "POST",
 		headers: {
@@ -48,8 +48,21 @@ async function createApiKey(app: ReturnType<typeof createTestApp>) {
 		},
 		body: JSON.stringify({ label: "mcp-test" }),
 	});
-	const body = (await res.json()) as { key: string };
+	const body = (await res.json()) as { id: string; key: string };
 	return body.key;
+}
+
+async function createApiKeyWithId(app: ReturnType<typeof createTestApp>, jwtToken?: string) {
+	const token = jwtToken ?? (await getToken(app));
+	const res = await app.request("/api/keys", {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${token}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({ label: "mcp-test" }),
+	});
+	return (await res.json()) as { id: string; key: string };
 }
 
 interface JsonRpcResponse {
@@ -443,6 +456,73 @@ describe("MCP server", () => {
 		const searchCall = mockSearch.mock.calls[0] as unknown[];
 		const searchParams = searchCall[1] as Record<string, unknown>;
 		expect(searchParams.limit).toBe(5);
+	});
+
+	test("get_observation returns full observation data", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const { id: keyId, key: rawKey } = await createApiKeyWithId(app);
+
+		const sessionId = createSession({
+			claudeSessionId: "test-session-obs",
+			apiKeyId: keyId,
+		});
+		const obsId = createObservation({
+			sessionId,
+			event: "UserPromptSubmit",
+			content: JSON.stringify({ prompt: "fix the bug" }),
+			prompt: "fix the bug",
+		});
+
+		const data = await mcpCallTool(app, rawKey, "get_observation", { id: obsId });
+
+		expect(data.result?.isError).toBeUndefined();
+		const text = data.result?.content?.[0]?.text;
+		const parsed = JSON.parse(text ?? "{}") as {
+			id: string;
+			session_id: string;
+			event: string;
+			prompt: string;
+		};
+		expect(parsed.id).toBe(obsId);
+		expect(parsed.session_id).toBe(sessionId);
+		expect(parsed.event).toBe("UserPromptSubmit");
+		expect(parsed.prompt).toBe("fix the bug");
+	});
+
+	test("get_observation returns not found for nonexistent ID", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		const data = await mcpCallTool(app, apiKey, "get_observation", { id: "nope" });
+
+		expect(data.result?.content?.[0]?.text).toBe("Observation not found.");
+	});
+
+	test("get_observation prevents accessing another user's observations", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const adminToken = await getToken(app);
+		const { id: adminKeyId } = await createApiKeyWithId(app);
+
+		const sessionId = createSession({
+			claudeSessionId: "admin-session",
+			apiKeyId: adminKeyId,
+		});
+		const obsId = createObservation({
+			sessionId,
+			event: "PostToolUse",
+			content: JSON.stringify({ tool_input: { path: "/secret" } }),
+		});
+
+		// Create a regular user and try to access admin's observation
+		const user = await createRegularUser(app, adminToken);
+		const userApiKey = await createApiKey(app, user.token);
+
+		const data = await mcpCallTool(app, userApiKey, "get_observation", { id: obsId });
+
+		expect(data.result?.content?.[0]?.text).toBe("Observation not found.");
 	});
 });
 

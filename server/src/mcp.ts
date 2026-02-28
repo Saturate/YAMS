@@ -10,6 +10,7 @@ import {
 	countObservations,
 	deleteMemory,
 	getMemoryForUser,
+	getObservationForUser,
 	getRecentSessionSummaries,
 	getSessionFilesModified,
 	getSessionForUser,
@@ -382,6 +383,64 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 								ended_at: session.ended_at,
 								files_modified: filesModified.length > 0 ? filesModified : undefined,
 								observations,
+							},
+							null,
+							2,
+						),
+					},
+				],
+			};
+		},
+	);
+
+	server.registerTool(
+		"get_observation",
+		{
+			description:
+				"Get a single observation by ID with full content. Observation IDs are returned by get_session_detail. Cost: DB read only, no LLM.",
+			inputSchema: {
+				id: z.string().describe("The observation ID"),
+			},
+		},
+		(args) => {
+			const observation = getObservationForUser(args.id, apiKey.user_id);
+			if (!observation) {
+				return {
+					content: [{ type: "text" as const, text: "Observation not found." }],
+				};
+			}
+
+			let parsed: Record<string, unknown> = {};
+			try {
+				parsed = JSON.parse(observation.content);
+			} catch {
+				// raw content fallback
+			}
+
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(
+							{
+								id: observation.id,
+								session_id: observation.session_id,
+								event: observation.event,
+								tool_name: observation.tool_name,
+								created_at: observation.created_at,
+								prompt: observation.prompt ?? parsed.prompt ?? undefined,
+								tool_input: parsed.tool_input ?? undefined,
+								tool_response: parsed.tool_response ?? undefined,
+								tool_input_summary: observation.tool_input_summary ?? undefined,
+								files_modified: observation.files_modified
+									? (() => {
+											try {
+												return JSON.parse(observation.files_modified);
+											} catch {
+												return undefined;
+											}
+										})()
+									: undefined,
 							},
 							null,
 							2,
