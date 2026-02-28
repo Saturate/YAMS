@@ -51,7 +51,7 @@ Add a `.mcp.json` to your project root (or `~/.claude/.mcp.json` for global acce
 }
 ```
 
-Restart Claude Code and the MCP tools (`search`, `remember`, `list_projects`) are available immediately.
+Restart Claude Code and the MCP tools (`search`, `remember`, `list_projects`, `session_context`, `get_session_detail`) are available immediately.
 
 **Option B: Plugin** (includes session-end hooks and skills)
 

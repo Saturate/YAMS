@@ -5,6 +5,7 @@ import { DashboardPage } from "@/pages/dashboard";
 import { KeysPage } from "@/pages/keys";
 import { LoginPage } from "@/pages/login";
 import { MemoriesPage } from "@/pages/memories";
+import { SessionsPage } from "@/pages/sessions";
 import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { InvitePage } from "@/pages/invite";
@@ -47,6 +48,7 @@ export function App() {
 								<Route path="/dashboard" element={<DashboardPage />} />
 								<Route path="/keys" element={<KeysPage />} />
 								<Route path="/memories" element={<MemoriesPage />} />
+								<Route path="/sessions" element={<SessionsPage />} />
 								<Route path="/users" element={<UsersPage />} />
 								<Route path="/settings" element={<SettingsPage />} />
 							</Route>

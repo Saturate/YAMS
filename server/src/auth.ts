@@ -262,6 +262,83 @@ keys.delete("/:id", (c) => {
 	return c.json({ id, revoked: true });
 });
 
+keys.get("/:id/hooks-config", (c) => {
+	const id = c.req.param("id");
+	const existing = getApiKeyById(id);
+
+	if (!existing || existing.user_id !== c.get("userId")) {
+		return c.json({ error: "Key not found." }, 404);
+	}
+
+	const origin = new URL(c.req.url).origin;
+	const config = {
+		hooks: {
+			SessionStart: [
+				{
+					hooks: [
+						{
+							type: "http",
+							url: `${origin}/hooks/session-start`,
+							headers: { Authorization: "Bearer $YAMS_API_KEY" },
+							timeout: 5,
+						},
+					],
+				},
+			],
+			UserPromptSubmit: [
+				{
+					hooks: [
+						{
+							type: "http",
+							url: `${origin}/hooks/observation`,
+							headers: { Authorization: "Bearer $YAMS_API_KEY" },
+							timeout: 2,
+						},
+					],
+				},
+			],
+			PostToolUse: [
+				{
+					hooks: [
+						{
+							type: "http",
+							url: `${origin}/hooks/observation`,
+							headers: { Authorization: "Bearer $YAMS_API_KEY" },
+							timeout: 2,
+						},
+					],
+				},
+			],
+			Stop: [
+				{
+					hooks: [
+						{
+							type: "http",
+							url: `${origin}/hooks/observation`,
+							headers: { Authorization: "Bearer $YAMS_API_KEY" },
+							timeout: 2,
+						},
+					],
+				},
+			],
+			SessionEnd: [
+				{
+					hooks: [
+						{
+							type: "http",
+							url: `${origin}/hooks/session-end`,
+							headers: { Authorization: "Bearer $YAMS_API_KEY" },
+							timeout: 5,
+						},
+					],
+				},
+			],
+		},
+	};
+
+	return c.json(config);
+});
+
 // --- User management routes (admin-only) ---
 
 const users = new Hono<AppEnv>();

@@ -127,6 +127,7 @@ export interface StatsResponse {
 	memories: number;
 	keys: { total: number; active: number };
 	projects: number;
+	sessions: { total: number; active: number };
 }
 
 export interface FiltersResponse {
@@ -147,6 +148,46 @@ export interface SearchResult {
 
 export interface SearchResponse {
 	results: SearchResult[];
+}
+
+export interface Session {
+	id: string;
+	claude_session_id: string;
+	api_key_id: string;
+	project: string | null;
+	status: string;
+	summary: string | null;
+	started_at: string;
+	ended_at: string | null;
+	observation_count: number;
+}
+
+export interface SessionsResponse {
+	sessions: Session[];
+	total: number;
+}
+
+export interface Observation {
+	id: string;
+	session_id: string;
+	event: string;
+	tool_name: string | null;
+	content: string;
+	compressed: number;
+	created_at: string;
+}
+
+export interface SessionDetailResponse {
+	session: Session;
+	observations: Observation[];
+}
+
+export interface SettingsResponse {
+	settings: Record<string, string | null>;
+}
+
+export interface HooksConfigResponse {
+	hooks: Record<string, unknown>;
 }
 
 export const api = {
@@ -290,6 +331,57 @@ export const api = {
 				method: "POST",
 				body: JSON.stringify({ username, password }),
 			},
+		);
+	},
+
+	// --- Sessions ---
+
+	listSessions(opts?: {
+		project?: string;
+		status?: string;
+		limit?: number;
+		offset?: number;
+	}) {
+		const params = new URLSearchParams();
+		if (opts?.project) params.set("project", opts.project);
+		if (opts?.status) params.set("status", opts.status);
+		if (opts?.limit) params.set("limit", String(opts.limit));
+		if (opts?.offset) params.set("offset", String(opts.offset));
+		const qs = params.toString();
+		return request<SessionsResponse>(`/api/admin/sessions${qs ? `?${qs}` : ""}`);
+	},
+
+	getSession(id: string) {
+		return request<SessionDetailResponse>(
+			`/api/admin/sessions/${encodeURIComponent(id)}`,
+		);
+	},
+
+	deleteSession(id: string) {
+		return request<{ id: string; deleted: true }>(
+			`/api/admin/sessions/${encodeURIComponent(id)}`,
+			{ method: "DELETE" },
+		);
+	},
+
+	// --- Settings ---
+
+	getSettings() {
+		return request<SettingsResponse>("/api/admin/settings");
+	},
+
+	updateSettings(settings: Record<string, string | null>) {
+		return request<{ ok: true }>("/api/admin/settings", {
+			method: "PUT",
+			body: JSON.stringify(settings),
+		});
+	},
+
+	// --- Hooks config ---
+
+	getHooksConfig(keyId: string) {
+		return request<HooksConfigResponse>(
+			`/api/keys/${encodeURIComponent(keyId)}/hooks-config`,
 		);
 	},
 };

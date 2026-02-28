@@ -38,6 +38,7 @@ const NAV_ITEMS: NavItem[] = [
 	{ to: "/dashboard", label: "Dashboard" },
 	{ to: "/keys", label: "API Keys" },
 	{ to: "/memories", label: "Memories" },
+	{ to: "/sessions", label: "Sessions" },
 	{ to: "/users", label: "Users", adminOnly: true },
 	{ to: "/settings", label: "Settings" },
 ];

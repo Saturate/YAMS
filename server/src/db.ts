@@ -39,7 +39,9 @@ export function initDb(path?: string): Database {
 		)
 	`);
 	// Migration: add role column if missing (existing DBs)
-	const userCols = db.query<{ name: string; notnull: number }, []>("PRAGMA table_info(users)").all();
+	const userCols = db
+		.query<{ name: string; notnull: number }, []>("PRAGMA table_info(users)")
+		.all();
 	const colNames = new Set(userCols.map((c) => c.name));
 	if (!colNames.has("role")) {
 		db.run("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
@@ -57,7 +59,7 @@ export function initDb(path?: string): Database {
 	// Migration: make password_hash nullable (required for OAuth users)
 	// SQLite can't ALTER COLUMN, so we recreate the table.
 	const pwCol = userCols.find((c) => c.name === "password_hash");
-	if (pwCol && pwCol.notnull) {
+	if (pwCol?.notnull) {
 		db.run("PRAGMA foreign_keys = OFF");
 		db.run("BEGIN");
 		db.run("DROP TABLE IF EXISTS users_new");
@@ -73,7 +75,9 @@ export function initDb(path?: string): Database {
 				created_at TEXT NOT NULL DEFAULT (datetime('now'))
 			)
 		`);
-		db.run("INSERT INTO users_new SELECT id, username, password_hash, role, oauth_provider, oauth_id, avatar_url, created_at FROM users");
+		db.run(
+			"INSERT INTO users_new SELECT id, username, password_hash, role, oauth_provider, oauth_id, avatar_url, created_at FROM users",
+		);
 		db.run("DROP TABLE users");
 		db.run("ALTER TABLE users_new RENAME TO users");
 		db.run(
@@ -127,6 +131,49 @@ export function initDb(path?: string): Database {
 	db.run("CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token)");
 	db.run("CREATE INDEX IF NOT EXISTS idx_invites_email ON invites(email)");
 
+	db.run(`
+		CREATE TABLE IF NOT EXISTS sessions (
+			id TEXT PRIMARY KEY,
+			claude_session_id TEXT NOT NULL,
+			api_key_id TEXT NOT NULL REFERENCES api_keys(id),
+			project TEXT,
+			status TEXT NOT NULL DEFAULT 'active',
+			summary TEXT,
+			started_at TEXT NOT NULL DEFAULT (datetime('now')),
+			ended_at TEXT
+		)
+	`);
+	db.run(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_claude_apikey ON sessions(claude_session_id, api_key_id)",
+	);
+	db.run("CREATE INDEX IF NOT EXISTS idx_sessions_api_key_id ON sessions(api_key_id)");
+	db.run("CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)");
+
+	db.run(`
+		CREATE TABLE IF NOT EXISTS observations (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL REFERENCES sessions(id),
+			event TEXT NOT NULL,
+			tool_name TEXT,
+			content TEXT NOT NULL,
+			compressed INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)
+	`);
+	db.run("CREATE INDEX IF NOT EXISTS idx_observations_session_id ON observations(session_id)");
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_observations_compressed ON observations(compressed) WHERE compressed = 0",
+	);
+
+	// Migration: add enrichment columns to observations
+	const obsCols = db.query<{ name: string }, []>("PRAGMA table_info(observations)").all();
+	const obsColNames = new Set(obsCols.map((c) => c.name));
+	if (!obsColNames.has("prompt")) {
+		db.run("ALTER TABLE observations ADD COLUMN prompt TEXT");
+		db.run("ALTER TABLE observations ADD COLUMN tool_input_summary TEXT");
+		db.run("ALTER TABLE observations ADD COLUMN files_modified TEXT");
+	}
+
 	return db;
 }
 
@@ -149,9 +196,7 @@ export interface UserRow {
 }
 
 export function getUserByUsername(username: string) {
-	return db
-		.query<UserRow, [string]>("SELECT * FROM users WHERE username = ?")
-		.get(username);
+	return db.query<UserRow, [string]>("SELECT * FROM users WHERE username = ?").get(username);
 }
 
 export function getUserById(id: string) {
@@ -167,9 +212,7 @@ export function getUserByOAuth(provider: string, oauthId: string) {
 }
 
 export function listUsers() {
-	return db
-		.query<UserRow, []>("SELECT * FROM users ORDER BY created_at ASC")
-		.all();
+	return db.query<UserRow, []>("SELECT * FROM users ORDER BY created_at ASC").all();
 }
 
 export function createUser(
@@ -194,6 +237,14 @@ export function createUser(
 
 export function deleteUser(id: string): boolean {
 	const txn = db.transaction(() => {
+		// Delete observations belonging to sessions owned by this user's API keys
+		db.query(
+			"DELETE FROM observations WHERE session_id IN (SELECT id FROM sessions WHERE api_key_id IN (SELECT id FROM api_keys WHERE user_id = ?))",
+		).run(id);
+		// Delete sessions owned by this user's API keys
+		db.query(
+			"DELETE FROM sessions WHERE api_key_id IN (SELECT id FROM api_keys WHERE user_id = ?)",
+		).run(id);
 		// Delete memories owned by this user's API keys
 		db.query(
 			"DELETE FROM memories WHERE api_key_id IN (SELECT id FROM api_keys WHERE user_id = ?)",
@@ -446,15 +497,11 @@ export function createInvite(params: {
 }
 
 export function getInviteByToken(token: string) {
-	return db
-		.query<InviteRow, [string]>("SELECT * FROM invites WHERE token = ?")
-		.get(token);
+	return db.query<InviteRow, [string]>("SELECT * FROM invites WHERE token = ?").get(token);
 }
 
 export function listInvites() {
-	return db
-		.query<InviteRow, []>("SELECT * FROM invites ORDER BY created_at DESC")
-		.all();
+	return db.query<InviteRow, []>("SELECT * FROM invites ORDER BY created_at DESC").all();
 }
 
 export function deleteInvite(id: string): boolean {
@@ -464,6 +511,339 @@ export function deleteInvite(id: string): boolean {
 
 export function markInviteUsed(id: string) {
 	db.query("UPDATE invites SET used_at = datetime('now') WHERE id = ?").run(id);
+}
+
+// --- Config ---
+
+export function getConfig(key: string): string | undefined {
+	const row = db
+		.query<{ value: string }, [string]>("SELECT value FROM config WHERE key = ?")
+		.get(key);
+	return row?.value;
+}
+
+export function setConfig(key: string, value: string): void {
+	db.query("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)").run(key, value);
+}
+
+export function deleteConfig(key: string): boolean {
+	const result = db.query("DELETE FROM config WHERE key = ?").run(key);
+	return result.changes > 0;
+}
+
+export function getConfigWithEnv(key: string, envVar: string): string | undefined {
+	return process.env[envVar] ?? getConfig(key);
+}
+
+// --- Sessions ---
+
+export interface SessionRow {
+	id: string;
+	claude_session_id: string;
+	api_key_id: string;
+	project: string | null;
+	status: string;
+	summary: string | null;
+	started_at: string;
+	ended_at: string | null;
+}
+
+export function findSession(claudeSessionId: string, apiKeyId: string): SessionRow | undefined {
+	return (
+		db
+			.query<SessionRow, [string, string]>(
+				"SELECT * FROM sessions WHERE claude_session_id = ? AND api_key_id = ?",
+			)
+			.get(claudeSessionId, apiKeyId) ?? undefined
+	);
+}
+
+export function createSession(params: {
+	claudeSessionId: string;
+	apiKeyId: string;
+	project?: string | null;
+}): string {
+	const id = crypto.randomUUID();
+	db.query(
+		"INSERT INTO sessions (id, claude_session_id, api_key_id, project) VALUES (?, ?, ?, ?)",
+	).run(id, params.claudeSessionId, params.apiKeyId, params.project ?? null);
+	return id;
+}
+
+export function findOrCreateSession(params: {
+	claudeSessionId: string;
+	apiKeyId: string;
+	project?: string | null;
+}): SessionRow {
+	const existing = findSession(params.claudeSessionId, params.apiKeyId);
+	if (existing) return existing;
+
+	const id = createSession(params);
+	return (
+		findSession(params.claudeSessionId, params.apiKeyId) ?? {
+			id,
+			claude_session_id: params.claudeSessionId,
+			api_key_id: params.apiKeyId,
+			project: params.project ?? null,
+			status: "active",
+			summary: null,
+			started_at: new Date().toISOString(),
+			ended_at: null,
+		}
+	);
+}
+
+export function endSession(id: string): boolean {
+	const result = db
+		.query("UPDATE sessions SET status = 'ended', ended_at = datetime('now') WHERE id = ?")
+		.run(id);
+	return result.changes > 0;
+}
+
+export function updateSessionSummary(id: string, summary: string): void {
+	db.query("UPDATE sessions SET summary = ? WHERE id = ?").run(summary, id);
+}
+
+export function getSession(id: string): SessionRow | undefined {
+	return db.query<SessionRow, [string]>("SELECT * FROM sessions WHERE id = ?").get(id) ?? undefined;
+}
+
+export function getSessionForUser(id: string, userId: string): SessionRow | undefined {
+	return (
+		db
+			.query<SessionRow, [string, string]>(
+				"SELECT s.* FROM sessions s JOIN api_keys ak ON s.api_key_id = ak.id WHERE s.id = ? AND ak.user_id = ?",
+			)
+			.get(id, userId) ?? undefined
+	);
+}
+
+export function listSessions(opts?: {
+	userId?: string;
+	project?: string;
+	status?: string;
+	limit?: number;
+	offset?: number;
+}): SessionRow[] {
+	const conditions: string[] = [];
+	const params: (string | number)[] = [];
+
+	if (opts?.userId) {
+		conditions.push("ak.user_id = ?");
+		params.push(opts.userId);
+	}
+	if (opts?.project) {
+		conditions.push("s.project = ?");
+		params.push(opts.project);
+	}
+	if (opts?.status) {
+		conditions.push("s.status = ?");
+		params.push(opts.status);
+	}
+
+	const needsJoin = opts?.userId != null;
+	let sql = needsJoin
+		? "SELECT s.* FROM sessions s JOIN api_keys ak ON s.api_key_id = ak.id"
+		: "SELECT * FROM sessions s";
+
+	if (conditions.length > 0) {
+		sql += ` WHERE ${conditions.join(" AND ")}`;
+	}
+	sql += " ORDER BY s.started_at DESC";
+
+	const limit = opts?.limit ?? 50;
+	const offset = opts?.offset ?? 0;
+	sql += " LIMIT ? OFFSET ?";
+	params.push(limit, offset);
+
+	return db.query<SessionRow, (string | number)[]>(sql).all(...params);
+}
+
+export function countSessions(opts?: { userId?: string; status?: string }): number {
+	const conditions: string[] = [];
+	const params: string[] = [];
+
+	if (opts?.userId) {
+		conditions.push("ak.user_id = ?");
+		params.push(opts.userId);
+	}
+	if (opts?.status) {
+		conditions.push("s.status = ?");
+		params.push(opts.status);
+	}
+
+	const needsJoin = opts?.userId != null;
+	let sql = needsJoin
+		? "SELECT COUNT(*) as count FROM sessions s JOIN api_keys ak ON s.api_key_id = ak.id"
+		: "SELECT COUNT(*) as count FROM sessions s";
+
+	if (conditions.length > 0) {
+		sql += ` WHERE ${conditions.join(" AND ")}`;
+	}
+
+	const row = db.query<{ count: number }, string[]>(sql).get(...params);
+	return row?.count ?? 0;
+}
+
+export function deleteSession(id: string): boolean {
+	const txn = db.transaction(() => {
+		db.query("DELETE FROM observations WHERE session_id = ?").run(id);
+		const result = db.query("DELETE FROM sessions WHERE id = ?").run(id);
+		return result.changes > 0;
+	});
+	return txn();
+}
+
+// --- Observations ---
+
+export interface ObservationRow {
+	id: string;
+	session_id: string;
+	event: string;
+	tool_name: string | null;
+	content: string;
+	prompt: string | null;
+	tool_input_summary: string | null;
+	files_modified: string | null;
+	compressed: number;
+	created_at: string;
+}
+
+export function createObservation(params: {
+	sessionId: string;
+	event: string;
+	toolName?: string | null;
+	content: string;
+	prompt?: string | null;
+	toolInputSummary?: string | null;
+	filesModified?: string | null;
+}): string {
+	const id = crypto.randomUUID();
+	const truncated =
+		params.content.length > 50_000 ? params.content.slice(0, 50_000) : params.content;
+	db.query(
+		`INSERT INTO observations (id, session_id, event, tool_name, content, prompt, tool_input_summary, files_modified)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	).run(
+		id,
+		params.sessionId,
+		params.event,
+		params.toolName ?? null,
+		truncated,
+		params.prompt ?? null,
+		params.toolInputSummary ?? null,
+		params.filesModified ?? null,
+	);
+	return id;
+}
+
+export function listObservations(sessionId: string): ObservationRow[] {
+	return db
+		.query<ObservationRow, [string]>(
+			"SELECT * FROM observations WHERE session_id = ? ORDER BY created_at ASC",
+		)
+		.all(sessionId);
+}
+
+export function countObservations(sessionId: string): number {
+	const row = db
+		.query<{ count: number }, [string]>(
+			"SELECT COUNT(*) as count FROM observations WHERE session_id = ?",
+		)
+		.get(sessionId);
+	return row?.count ?? 0;
+}
+
+export function getUncompressedSessions(): SessionRow[] {
+	return db
+		.query<SessionRow, []>(
+			`SELECT DISTINCT s.* FROM sessions s
+			 JOIN observations o ON o.session_id = s.id
+			 WHERE s.status = 'ended' AND o.compressed = 0
+			 ORDER BY s.ended_at ASC`,
+		)
+		.all();
+}
+
+export function getUncompressedObservations(sessionId: string): ObservationRow[] {
+	return db
+		.query<ObservationRow, [string]>(
+			"SELECT * FROM observations WHERE session_id = ? AND compressed = 0 ORDER BY created_at ASC",
+		)
+		.all(sessionId);
+}
+
+export function countUncompressedObservations(sessionId: string): number {
+	const row = db
+		.query<{ count: number }, [string]>(
+			"SELECT COUNT(*) as count FROM observations WHERE session_id = ? AND compressed = 0",
+		)
+		.get(sessionId);
+	return row?.count ?? 0;
+}
+
+export function getSessionFilesModified(sessionId: string): string[] {
+	const rows = db
+		.query<{ files_modified: string }, [string]>(
+			"SELECT DISTINCT files_modified FROM observations WHERE session_id = ? AND files_modified IS NOT NULL",
+		)
+		.all(sessionId);
+
+	const files = new Set<string>();
+	for (const row of rows) {
+		try {
+			const parsed = JSON.parse(row.files_modified) as string[];
+			for (const f of parsed) files.add(f);
+		} catch {
+			/* skip malformed */
+		}
+	}
+	return [...files];
+}
+
+export function markObservationsCompressed(sessionId: string): void {
+	db.query("UPDATE observations SET compressed = 1 WHERE session_id = ? AND compressed = 0").run(
+		sessionId,
+	);
+}
+
+export function getStaleActiveSessions(intervalMinutes: number): SessionRow[] {
+	return db
+		.query<SessionRow, [number]>(
+			`SELECT DISTINCT s.* FROM sessions s
+			 JOIN observations o ON o.session_id = s.id
+			 WHERE s.status = 'active' AND o.compressed = 0
+			 AND o.created_at <= datetime('now', '-' || ? || ' minutes')
+			 ORDER BY s.started_at ASC`,
+		)
+		.all(intervalMinutes);
+}
+
+export function getRecentSessionSummaries(opts: {
+	userId: string;
+	project?: string | null;
+	limit?: number;
+}): SessionRow[] {
+	const conditions = ["ak.user_id = ?", "s.summary IS NOT NULL"];
+	const params: (string | number)[] = [opts.userId];
+
+	if (opts.project) {
+		conditions.push("s.project = ?");
+		params.push(opts.project);
+	}
+
+	const limit = opts.limit ?? 5;
+	params.push(limit);
+
+	return db
+		.query<SessionRow, (string | number)[]>(
+			`SELECT s.* FROM sessions s
+			 JOIN api_keys ak ON s.api_key_id = ak.id
+			 WHERE ${conditions.join(" AND ")}
+			 ORDER BY s.started_at DESC
+			 LIMIT ?`,
+		)
+		.all(...params);
 }
 
 // --- JWT Secret ---

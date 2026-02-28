@@ -12,6 +12,7 @@ import { mountMcp } from "./mcp.js";
 import { isGitHubOAuthEnabled, oauth } from "./oauth.js";
 import { getQdrantClient } from "./qdrant.js";
 import { rateLimiter } from "./rate-limit.js";
+import { sessions } from "./sessions.js";
 import { setup, setupGuard } from "./setup.js";
 
 const log = getLogger(["yams", "server"]);
@@ -65,6 +66,7 @@ app.use("/api/users/*", rateLimiter({ window: 60, max: 20 }));
 app.use("/api/invites/*", rateLimiter({ window: 60, max: 10 }));
 app.use("/ingest/*", rateLimiter({ window: 60, max: 60 }));
 app.use("/mcp/*", rateLimiter({ window: 60, max: 60 }));
+app.use("/hooks/*", rateLimiter({ window: 60, max: 120 }));
 
 app.route("/setup", setup);
 app.route("/api/auth", auth);
@@ -82,6 +84,7 @@ app.get("/api/auth/providers", (c) => {
 });
 
 app.route("/ingest", ingest);
+app.route("/hooks", sessions);
 mountMcp(app);
 
 // Serve built UI static assets
