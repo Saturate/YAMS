@@ -230,6 +230,7 @@ const CONFIG_KEYS = [
 	"compression_interval_minutes",
 	"session_context_count",
 	"privacy_patterns",
+	"dedup_threshold",
 ] as const;
 
 admin.get("/settings", (c) => {
@@ -326,6 +327,12 @@ admin.put("/settings", async (c) => {
 			const num = Number(value);
 			if (!Number.isInteger(num) || num < 1 || num > 20) {
 				return c.json({ error: "session_context_count must be an integer between 1 and 20." }, 400);
+			}
+		}
+		if (key === "dedup_threshold" && value !== null) {
+			const num = Number(value);
+			if (!Number.isFinite(num) || num < 0.5 || num > 1.0) {
+				return c.json({ error: "dedup_threshold must be a number between 0.5 and 1.0." }, 400);
 			}
 		}
 

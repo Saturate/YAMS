@@ -408,6 +408,10 @@ export function listMemories(opts?: {
 	return db.query<MemoryRow, (string | number)[]>(sql).all(...params);
 }
 
+export function updateMemorySummary(id: string, summary: string): void {
+	db.query("UPDATE memories SET summary = ? WHERE id = ?").run(summary, id);
+}
+
 export function deleteMemory(id: string): boolean {
 	const result = db.query("DELETE FROM memories WHERE id = ?").run(id);
 	return result.changes > 0;

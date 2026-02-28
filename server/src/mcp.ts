@@ -18,7 +18,7 @@ import {
 	listObservations,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
-import { StoreMemoryError, storeMemory } from "./ingest.js";
+import { StoreMemoryError, isDuplicate, storeMemory } from "./ingest.js";
 import { deletePoint, searchMemories } from "./qdrant.js";
 
 const log = getLogger(["yams", "mcp"]);
@@ -131,7 +131,8 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 	server.registerTool(
 		"remember",
 		{
-			description: "Store a new memory. Cost: embedding call + DB write, no LLM.",
+			description:
+				"Store a new memory. Checks for duplicates — if a similar memory exists, returns it instead of storing. Use force to skip the check, or replace to overwrite an existing memory. Cost: embedding call + vector search + DB write, no LLM.",
 			inputSchema: {
 				content: z.string().describe("The content to remember"),
 				scope: z
@@ -139,6 +140,11 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					.optional()
 					.describe("Memory scope (default: session)"),
 				project: z.string().optional().describe("Git remote / project identifier"),
+				force: z.boolean().optional().describe("Skip duplicate check and store anyway"),
+				replace: z
+					.string()
+					.optional()
+					.describe("ID of an existing memory to overwrite with new content"),
 			},
 		},
 		async (args) => {
@@ -150,7 +156,20 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					userId: apiKey.user_id,
 					gitRemote: args.project,
 					scope: args.scope,
+					force: args.force,
+					replace: args.replace,
 				});
+
+				if (isDuplicate(result)) {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: JSON.stringify(result, null, 2),
+							},
+						],
+					};
+				}
 
 				return {
 					content: [

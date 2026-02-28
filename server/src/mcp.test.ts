@@ -9,22 +9,10 @@ import { createRegularUser, createTestApp, getToken, setupAdmin } from "./test-h
 const mockVector = new Array(768).fill(0.1) as number[];
 const mockEmbed = mock(() => Promise.resolve(mockVector));
 const mockUpsert = mock(() => Promise.resolve({}));
-const mockSearch = mock(() =>
-	Promise.resolve([
-		{
-			id: "pt-1",
-			version: 1,
-			score: 0.95,
-			payload: {
-				memory_id: "mem-1",
-				git_remote: "github.com/org/repo",
-				scope: "session",
-				api_key_label: "test-key",
-				created_at: "2026-01-01T00:00:00.000Z",
-			},
-		},
-	]),
-);
+const mockDelete = mock(() => Promise.resolve({}));
+// Default: return empty results (dedup won't trigger).
+// Tests that need search results override this via mockSearch.mockImplementation()
+const mockSearch = mock(() => Promise.resolve([] as unknown[]));
 
 const mockProvider: EmbeddingProvider = {
 	name: "mock",
@@ -36,6 +24,7 @@ const mockQdrantClient = {
 	getCollections: () => Promise.resolve({ collections: [{ name: "yams_memories" }] }),
 	upsert: mockUpsert,
 	search: mockSearch,
+	delete: mockDelete,
 } as unknown as import("@qdrant/js-client-rest").QdrantClient;
 
 async function createApiKey(app: ReturnType<typeof createTestApp>, jwtToken?: string) {
@@ -135,7 +124,9 @@ describe("MCP server", () => {
 		setQdrantClient(mockQdrantClient);
 		mockEmbed.mockClear();
 		mockUpsert.mockClear();
-		mockSearch.mockClear();
+		mockDelete.mockClear();
+		mockSearch.mockReset();
+		mockSearch.mockImplementation(() => Promise.resolve([] as unknown[]));
 	});
 
 	afterEach(() => {
@@ -175,6 +166,23 @@ describe("MCP server", () => {
 	});
 
 	test("search tool returns results", async () => {
+		mockSearch.mockImplementation(() =>
+			Promise.resolve([
+				{
+					id: "pt-1",
+					version: 1,
+					score: 0.95,
+					payload: {
+						memory_id: "mem-1",
+						git_remote: "github.com/org/repo",
+						scope: "session",
+						api_key_label: "test-key",
+						created_at: "2026-01-01T00:00:00.000Z",
+					},
+				},
+			]),
+		);
+
 		const app = createTestApp();
 		await setupAdmin(app);
 		const apiKey = await createApiKey(app);
@@ -523,6 +531,147 @@ describe("MCP server", () => {
 		const data = await mcpCallTool(app, userApiKey, "get_observation", { id: obsId });
 
 		expect(data.result?.content?.[0]?.text).toBe("Observation not found.");
+	});
+
+	test("remember returns duplicate when similar memory exists", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		// First store succeeds (no existing memories)
+		const first = await mcpCallTool(app, apiKey, "remember", {
+			content: "Always use strict TypeScript",
+			scope: "global",
+		});
+		const firstResult = JSON.parse(first.result?.content?.[0]?.text ?? "{}") as {
+			stored: boolean;
+			id: string;
+		};
+		expect(firstResult.stored).toBe(true);
+
+		// Mock search returns a high-similarity match for the next call
+		mockSearch.mockImplementation(() =>
+			Promise.resolve([
+				{
+					id: firstResult.id,
+					version: 1,
+					score: 0.95,
+					payload: { memory_id: firstResult.id },
+				},
+			]),
+		);
+
+		// Second store with similar content triggers dedup
+		const second = await mcpCallTool(app, apiKey, "remember", {
+			content: "Always use strict TypeScript mode",
+			scope: "global",
+		});
+
+		const result = JSON.parse(second.result?.content?.[0]?.text ?? "{}") as {
+			duplicate: boolean;
+			existing_id: string;
+			similarity: number;
+		};
+		expect(result.duplicate).toBe(true);
+		expect(result.existing_id).toBe(firstResult.id);
+		expect(result.similarity).toBeGreaterThanOrEqual(0.9);
+	});
+
+	test("remember with force skips dedup check", async () => {
+		// Mock search would return a match, but force should skip it
+		mockSearch.mockImplementation(() =>
+			Promise.resolve([
+				{
+					id: "existing-1",
+					version: 1,
+					score: 0.99,
+					payload: { memory_id: "existing-1" },
+				},
+			]),
+		);
+
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		const data = await mcpCallTool(app, apiKey, "remember", {
+			content: "Store this even if duplicate",
+			scope: "global",
+			force: true,
+		});
+
+		const result = JSON.parse(data.result?.content?.[0]?.text ?? "{}") as { stored: boolean };
+		expect(result.stored).toBe(true);
+	});
+
+	test("remember with replace overwrites existing memory", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		// Store original
+		const first = await mcpCallTool(app, apiKey, "remember", {
+			content: "Original content",
+			scope: "global",
+		});
+		const { id } = JSON.parse(first.result?.content?.[0]?.text ?? "{}") as { id: string };
+		expect(getMemory(id)?.summary).toBe("Original content");
+
+		// Replace it
+		const second = await mcpCallTool(app, apiKey, "remember", {
+			content: "Updated content",
+			scope: "global",
+			replace: id,
+		});
+
+		const result = JSON.parse(second.result?.content?.[0]?.text ?? "{}") as {
+			stored: boolean;
+			id: string;
+		};
+		expect(result.stored).toBe(true);
+		expect(result.id).toBe(id);
+		expect(getMemory(id)?.summary).toBe("Updated content");
+	});
+
+	test("remember with replace fails for nonexistent ID", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		const data = await mcpCallTool(app, apiKey, "remember", {
+			content: "Replace nothing",
+			replace: "does-not-exist",
+		});
+
+		expect(data.result?.isError).toBe(true);
+		expect(data.result?.content?.[0]?.text).toContain("not found");
+	});
+
+	test("dedup does not trigger below threshold", async () => {
+		// Mock returns a match but below the default 0.92 threshold
+		mockSearch.mockImplementation(() =>
+			Promise.resolve([
+				{
+					id: "existing-1",
+					version: 1,
+					score: 0.7,
+					payload: { memory_id: "existing-1" },
+				},
+			]),
+		);
+
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		const data = await mcpCallTool(app, apiKey, "remember", {
+			content: "Something somewhat related but different",
+			scope: "global",
+		});
+
+		const text = data.result?.content?.[0]?.text ?? "{}";
+		const result = JSON.parse(text) as { stored: boolean };
+		expect(result.stored).toBe(true);
 	});
 });
 
