@@ -1,5 +1,6 @@
 import { getLogger } from "@logtape/logtape";
 import { app } from "./app.js";
+import { initCompressionListener, runCompressionCycle } from "./compression.js";
 import { getUserCount, initDb } from "./db.js";
 import { checkOllamaModel } from "./embeddings.js";
 import { initLogging } from "./logger.js";
@@ -29,6 +30,12 @@ initQdrant()
 	);
 
 checkOllamaModel();
+initCompressionListener();
+runCompressionCycle().catch((err: unknown) =>
+	log.warn("Compression catch-up failed: {error}", {
+		error: err instanceof Error ? err.message : String(err),
+	}),
+);
 
 export default {
 	port,

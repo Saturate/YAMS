@@ -115,7 +115,9 @@ oauth.get("/github/callback", async (c) => {
 		const existingUser = getUserByOAuth("github", String(ghUser.id));
 		if (!existingUser) {
 			if (!allowedOrgs) {
-				log.info("GitHub user {user} rejected: OAUTH_ALLOWED_ORGS not configured", { user: ghUser.login });
+				log.info("GitHub user {user} rejected: OAUTH_ALLOWED_ORGS not configured", {
+					user: ghUser.login,
+				});
 				return c.redirect("/login?error=org_restricted");
 			}
 
@@ -147,7 +149,16 @@ oauth.get("/github/callback", async (c) => {
 				oauthId,
 				avatarUrl: ghUser.avatar_url,
 			});
-			user = { id, username: ghUser.login, password_hash: null, role: "user", oauth_provider: "github", oauth_id: oauthId, avatar_url: ghUser.avatar_url, created_at: new Date().toISOString() };
+			user = {
+				id,
+				username: ghUser.login,
+				password_hash: null,
+				role: "user",
+				oauth_provider: "github",
+				oauth_id: oauthId,
+				avatar_url: ghUser.avatar_url,
+				created_at: new Date().toISOString(),
+			};
 			log.info("Created OAuth user {username}", { username: ghUser.login });
 		} else {
 			role = user.role as UserRole;

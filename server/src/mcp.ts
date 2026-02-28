@@ -5,7 +5,15 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import type { ValidatedApiKey } from "./auth.js";
 import { validateBearerKey } from "./auth.js";
-import { listDistinctGitRemotes } from "./db.js";
+import { parseSummary } from "./compression.js";
+import {
+	countObservations,
+	getRecentSessionSummaries,
+	getSessionFilesModified,
+	getSessionForUser,
+	listDistinctGitRemotes,
+	listObservations,
+} from "./db.js";
 import { getProvider } from "./embeddings.js";
 import { StoreMemoryError, storeMemory } from "./ingest.js";
 import { searchMemories } from "./qdrant.js";
@@ -21,7 +29,8 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 	server.registerTool(
 		"search",
 		{
-			description: "Search memories by semantic similarity",
+			description:
+				"Search memories by semantic similarity. Cost: embedding call + DB read, no LLM.",
 			inputSchema: {
 				query: z.string().describe("The search query"),
 				scope: z.enum(["session", "project", "global"]).optional().describe("Filter by scope"),
@@ -85,7 +94,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 	server.registerTool(
 		"remember",
 		{
-			description: "Store a new memory",
+			description: "Store a new memory. Cost: embedding call + DB write, no LLM.",
 			inputSchema: {
 				content: z.string().describe("The content to remember"),
 				scope: z
@@ -143,7 +152,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 	server.registerTool(
 		"list_projects",
 		{
-			description: "List known projects (distinct git remotes)",
+			description: "List known projects (distinct git remotes). Cost: DB read only, no LLM.",
 		},
 		() => {
 			const projects = listDistinctGitRemotes(apiKey.user_id);
@@ -152,6 +161,160 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					{
 						type: "text" as const,
 						text: JSON.stringify({ projects }, null, 2),
+					},
+				],
+			};
+		},
+	);
+
+	server.registerTool(
+		"session_context",
+		{
+			description:
+				"List recent sessions as a compact index. Returns session IDs, dates, project, status, observation count, files modified, and a short summary preview. Use get_session_detail to fetch full details for interesting sessions. Cost: DB read only, no LLM.",
+			inputSchema: {
+				project: z.string().optional().describe("Filter by project (git remote or cwd)"),
+				limit: z
+					.number()
+					.int()
+					.min(1)
+					.max(20)
+					.optional()
+					.describe("Number of sessions to return (default 5)"),
+			},
+		},
+		(args) => {
+			const sessions = getRecentSessionSummaries({
+				userId: apiKey.user_id,
+				project: args.project,
+				limit: args.limit ?? 5,
+			});
+
+			if (sessions.length === 0) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: "No session summaries found.",
+						},
+					],
+				};
+			}
+
+			const PREVIEW_LENGTH = 120;
+			const formatted = sessions.map((s) => {
+				const summary = s.summary ?? "";
+				const filesModified = getSessionFilesModified(s.id);
+				return {
+					session_id: s.id,
+					project: s.project,
+					status: s.status,
+					started_at: s.started_at,
+					ended_at: s.ended_at,
+					observation_count: countObservations(s.id),
+					files_modified: filesModified.length > 0 ? filesModified : undefined,
+					summary_preview:
+						summary.length > PREVIEW_LENGTH ? `${summary.slice(0, PREVIEW_LENGTH)}...` : summary,
+				};
+			});
+
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(formatted, null, 2),
+					},
+				],
+			};
+		},
+	);
+
+	server.registerTool(
+		"get_session_detail",
+		{
+			description:
+				"Get full details for a specific session including the complete summary and all observations. Use session_context first to find relevant session IDs. Cost: DB read only, no LLM.",
+			inputSchema: {
+				session_id: z.string().describe("The session ID to retrieve"),
+			},
+		},
+		(args) => {
+			const session = getSessionForUser(args.session_id, apiKey.user_id);
+			if (!session) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: "Session not found.",
+						},
+					],
+				};
+			}
+
+			const filesModified = getSessionFilesModified(session.id);
+
+			const observations = listObservations(session.id).map((o) => {
+				// Use enriched columns when available, fall back to JSON parse
+				if (o.prompt || o.tool_input_summary) {
+					let parsedFiles: string[] | undefined;
+					if (o.files_modified) {
+						try {
+							parsedFiles = JSON.parse(o.files_modified);
+						} catch {
+							/* malformed JSON — skip */
+						}
+					}
+					return {
+						id: o.id,
+						event: o.event,
+						tool_name: o.tool_name,
+						created_at: o.created_at,
+						prompt: o.prompt ?? undefined,
+						tool_input_summary: o.tool_input_summary ?? undefined,
+						files_modified: parsedFiles,
+					};
+				}
+
+				// Pre-migration fallback: parse JSON content
+				let parsed: Record<string, unknown> = {};
+				try {
+					parsed = JSON.parse(o.content);
+				} catch {
+					// raw content fallback
+				}
+
+				return {
+					id: o.id,
+					event: o.event,
+					tool_name: o.tool_name,
+					created_at: o.created_at,
+					prompt: parsed.prompt ?? undefined,
+					tool_input: parsed.tool_input ?? undefined,
+					tool_response:
+						typeof parsed.tool_response === "string"
+							? parsed.tool_response.slice(0, 2000)
+							: undefined,
+				};
+			});
+
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(
+							{
+								session_id: session.id,
+								project: session.project,
+								status: session.status,
+								summary: session.summary ? parseSummary(session.summary) : null,
+								started_at: session.started_at,
+								ended_at: session.ended_at,
+								files_modified: filesModified.length > 0 ? filesModified : undefined,
+								observations,
+							},
+							null,
+							2,
+						),
 					},
 				],
 			};

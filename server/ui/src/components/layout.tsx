@@ -38,6 +38,7 @@ const NAV_ITEMS: NavItem[] = [
 	{ to: "/dashboard", label: "Dashboard" },
 	{ to: "/keys", label: "API Keys" },
 	{ to: "/memories", label: "Memories" },
+	{ to: "/sessions", label: "Sessions" },
 	{ to: "/users", label: "Users", adminOnly: true },
 	{ to: "/settings", label: "Settings" },
 ];
@@ -74,9 +75,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 						))}
 					</nav>
 					<div className="ml-auto flex items-center gap-2">
-						{username && (
-							<span className="text-sm text-muted-foreground">{username}</span>
-						)}
+						{username && <span className="text-sm text-muted-foreground">{username}</span>}
 						<Button variant="ghost" size="sm" onClick={logout}>
 							Log out
 						</Button>

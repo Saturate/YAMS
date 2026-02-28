@@ -116,7 +116,8 @@ export function UsersPage() {
 		variant: "default" | "secondary" | "destructive";
 	} {
 		if (invite.used_at) return { label: "Used", variant: "secondary" };
-		if (new Date(invite.expires_at) < new Date()) return { label: "Expired", variant: "destructive" };
+		if (new Date(invite.expires_at) < new Date())
+			return { label: "Expired", variant: "destructive" };
 		return { label: "Pending", variant: "default" };
 	}
 
@@ -254,7 +255,10 @@ export function UsersPage() {
 			</div>
 
 			{/* Invite link created dialog */}
-			<Dialog open={createdInvite !== null} onOpenChange={(open) => !open && setCreatedInvite(null)}>
+			<Dialog
+				open={createdInvite !== null}
+				onOpenChange={(open) => !open && setCreatedInvite(null)}
+			>
 				<DialogContent>
 					<DialogHeader>
 						<DialogTitle>Invite Created</DialogTitle>
@@ -311,11 +315,7 @@ export function UsersPage() {
 								<TableCell className="font-medium">
 									<span className="flex items-center gap-2">
 										{user.avatar_url && (
-											<img
-												src={user.avatar_url}
-												alt=""
-												className="h-6 w-6 rounded-full"
-											/>
+											<img src={user.avatar_url} alt="" className="h-6 w-6 rounded-full" />
 										)}
 										{user.username}
 									</span>
@@ -328,9 +328,7 @@ export function UsersPage() {
 								<TableCell className="text-sm text-muted-foreground">
 									{providerLabel(user)}
 								</TableCell>
-								<TableCell className="text-sm text-muted-foreground">
-									{user.key_count}
-								</TableCell>
+								<TableCell className="text-sm text-muted-foreground">{user.key_count}</TableCell>
 								<TableCell className="text-sm text-muted-foreground">
 									{relativeTime(user.created_at)}
 								</TableCell>
