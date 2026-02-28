@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { getMemory } from "./db.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { setProvider } from "./embeddings.js";
+import { estimateTokens } from "./mcp.js";
 import { setQdrantClient } from "./qdrant.js";
 import { createRegularUser, createTestApp, getToken, setupAdmin } from "./test-helpers.js";
 
@@ -372,5 +373,87 @@ describe("MCP server", () => {
 
 		// Verify memory still exists
 		expect(getMemory(id)).toBeDefined();
+	});
+
+	test("search with max_tokens returns memories within budget", async () => {
+		// Mock returns 3 results with summaries of known length
+		const multiResultSearch = mock(() =>
+			Promise.resolve([
+				{ id: "1", version: 1, score: 0.9, payload: { summary: "a".repeat(100) } },
+				{ id: "2", version: 1, score: 0.8, payload: { summary: "b".repeat(100) } },
+				{ id: "3", version: 1, score: 0.7, payload: { summary: "c".repeat(100) } },
+			]),
+		);
+		setQdrantClient({
+			getCollections: () => Promise.resolve({ collections: [{ name: "yams_memories" }] }),
+			upsert: mockUpsert,
+			search: multiResultSearch,
+		} as unknown as import("@qdrant/js-client-rest").QdrantClient);
+
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		// Budget that fits ~1 result (each result JSON is roughly 130 chars = ~33 tokens)
+		const data = await mcpCallTool(app, apiKey, "search", {
+			query: "test",
+			max_tokens: 40,
+		});
+
+		expect(data.result?.isError).toBeUndefined();
+		const memories = JSON.parse(data.result?.content?.[0]?.text ?? "[]") as unknown[];
+		expect(memories.length).toBeGreaterThanOrEqual(1);
+		expect(memories.length).toBeLessThan(3);
+	});
+
+	test("search with max_tokens always returns at least one result", async () => {
+		const bigResultSearch = mock(() =>
+			Promise.resolve([
+				{ id: "1", version: 1, score: 0.9, payload: { summary: "x".repeat(1000) } },
+			]),
+		);
+		setQdrantClient({
+			getCollections: () => Promise.resolve({ collections: [{ name: "yams_memories" }] }),
+			upsert: mockUpsert,
+			search: bigResultSearch,
+		} as unknown as import("@qdrant/js-client-rest").QdrantClient);
+
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		// Budget smaller than one result
+		const data = await mcpCallTool(app, apiKey, "search", {
+			query: "test",
+			max_tokens: 1,
+		});
+
+		const memories = JSON.parse(data.result?.content?.[0]?.text ?? "[]") as unknown[];
+		expect(memories).toHaveLength(1);
+	});
+
+	test("search without max_tokens uses limit as before", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		await mcpCallTool(app, apiKey, "search", { query: "test", limit: 5 });
+
+		expect(mockSearch).toHaveBeenCalledTimes(1);
+		const searchCall = mockSearch.mock.calls[0] as unknown[];
+		const searchParams = searchCall[1] as Record<string, unknown>;
+		expect(searchParams.limit).toBe(5);
+	});
+});
+
+describe("estimateTokens", () => {
+	test("estimates ~4 chars per token", () => {
+		expect(estimateTokens("abcd")).toBe(1);
+		expect(estimateTokens("abcdefgh")).toBe(2);
+		expect(estimateTokens("abcde")).toBe(2);
+	});
+
+	test("handles empty string", () => {
+		expect(estimateTokens("")).toBe(0);
 	});
 });

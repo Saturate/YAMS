@@ -22,6 +22,27 @@ import { deletePoint, searchMemories } from "./qdrant.js";
 
 const log = getLogger(["yams", "mcp"]);
 
+const CHARS_PER_TOKEN = 4;
+
+export function estimateTokens(text: string): number {
+	return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+function fitTokenBudget<T>(memories: T[], maxTokens: number): T[] {
+	const result: T[] = [];
+	let used = 0;
+
+	for (const memory of memories) {
+		const text = JSON.stringify(memory);
+		const cost = estimateTokens(text);
+		if (used + cost > maxTokens && result.length > 0) break;
+		result.push(memory);
+		used += cost;
+	}
+
+	return result;
+}
+
 function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 	const server = new McpServer({
 		name: "yams",
@@ -32,12 +53,19 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 		"search",
 		{
 			description:
-				"Search memories by semantic similarity. Cost: embedding call + DB read, no LLM.",
+				"Search memories by semantic similarity. When max_tokens is set, returns the most relevant memories that fit within the token budget — no need to guess a limit. Cost: embedding call + DB read, no LLM.",
 			inputSchema: {
 				query: z.string().describe("The search query"),
 				scope: z.enum(["session", "project", "global"]).optional().describe("Filter by scope"),
 				project: z.string().optional().describe("Filter by git remote / project"),
 				limit: z.number().int().min(1).max(50).optional().describe("Max results (default 10)"),
+				max_tokens: z
+					.number()
+					.int()
+					.min(1)
+					.max(100_000)
+					.optional()
+					.describe("Token budget — returns memories until budget is exhausted. Overrides limit."),
 			},
 		},
 		async (args) => {
@@ -59,16 +87,22 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			}
 
 			try {
+				// When token-budgeted, fetch generously and trim client-side
+				const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
 				const results = await searchMemories(
 					vector,
 					{ git_remote: args.project, scope: args.scope, user_id: apiKey.user_id },
-					args.limit ?? 10,
+					fetchLimit,
 				);
 
-				const memories = results.map((r) => ({
+				let memories = results.map((r) => ({
 					score: r.score,
 					...(r.payload ?? {}),
 				}));
+
+				if (args.max_tokens) {
+					memories = fitTokenBudget(memories, args.max_tokens);
+				}
 
 				return {
 					content: [
