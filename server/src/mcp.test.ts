@@ -3,7 +3,7 @@ import { getMemory } from "./db.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { setProvider } from "./embeddings.js";
 import { setQdrantClient } from "./qdrant.js";
-import { createTestApp, getToken, setupAdmin } from "./test-helpers.js";
+import { createRegularUser, createTestApp, getToken, setupAdmin } from "./test-helpers.js";
 
 const mockVector = new Array(768).fill(0.1) as number[];
 const mockEmbed = mock(() => Promise.resolve(mockVector));
@@ -302,5 +302,75 @@ describe("MCP server", () => {
 
 		expect(data.result?.isError).toBe(true);
 		expect(data.result?.content?.[0]?.text).toContain("Embedding service unavailable");
+	});
+
+	test("forget tool deletes own memory", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		// Store a memory first
+		const storeData = await mcpCallTool(app, apiKey, "remember", {
+			content: "delete me later",
+			scope: "global",
+		});
+		const storeText = storeData.result?.content?.[0]?.text;
+		const { id } = JSON.parse(storeText ?? "{}") as { id: string };
+		expect(getMemory(id)).toBeDefined();
+
+		// Delete it
+		const data = await mcpCallTool(app, apiKey, "forget", { id });
+
+		expect(data.result?.isError).toBeUndefined();
+		const text = data.result?.content?.[0]?.text;
+		const parsed = JSON.parse(text ?? "{}") as { id: string; deleted: boolean };
+		expect(parsed.deleted).toBe(true);
+		expect(getMemory(id)).toBeUndefined();
+	});
+
+	test("forget tool returns error for nonexistent memory", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		const data = await mcpCallTool(app, apiKey, "forget", { id: "does-not-exist" });
+
+		expect(data.result?.isError).toBe(true);
+		expect(data.result?.content?.[0]?.text).toBe("Memory not found.");
+	});
+
+	test("forget tool prevents deleting another user's memory", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const adminToken = await getToken(app);
+		const adminApiKey = await createApiKey(app);
+
+		// Store a memory as admin
+		const storeData = await mcpCallTool(app, adminApiKey, "remember", {
+			content: "admin's secret memory",
+			scope: "global",
+		});
+		const { id } = JSON.parse(storeData.result?.content?.[0]?.text ?? "{}") as { id: string };
+
+		// Create a regular user and get their API key
+		const user = await createRegularUser(app, adminToken);
+		const userKeyRes = await app.request("/api/keys", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${user.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ label: "user-key" }),
+		});
+		const userApiKey = ((await userKeyRes.json()) as { key: string }).key;
+
+		// Try to delete admin's memory as regular user
+		const data = await mcpCallTool(app, userApiKey, "forget", { id });
+
+		expect(data.result?.isError).toBe(true);
+		expect(data.result?.content?.[0]?.text).toBe("Memory not found.");
+
+		// Verify memory still exists
+		expect(getMemory(id)).toBeDefined();
 	});
 });

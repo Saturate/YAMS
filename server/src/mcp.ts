@@ -8,6 +8,8 @@ import { validateBearerKey } from "./auth.js";
 import { parseSummary } from "./compression.js";
 import {
 	countObservations,
+	deleteMemory,
+	getMemoryForUser,
 	getRecentSessionSummaries,
 	getSessionFilesModified,
 	getSessionForUser,
@@ -16,7 +18,7 @@ import {
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import { StoreMemoryError, storeMemory } from "./ingest.js";
-import { searchMemories } from "./qdrant.js";
+import { deletePoint, searchMemories } from "./qdrant.js";
 
 const log = getLogger(["yams", "mcp"]);
 
@@ -146,6 +148,41 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					],
 				};
 			}
+		},
+	);
+
+	server.registerTool(
+		"forget",
+		{
+			description:
+				"Delete a memory by ID. Use search first to find memory IDs. Cost: DB write + vector delete, no LLM.",
+			inputSchema: {
+				id: z.string().describe("The memory ID to delete (returned by search)"),
+			},
+		},
+		async (args) => {
+			const memory = getMemoryForUser(args.id, apiKey.user_id);
+			if (!memory) {
+				return {
+					isError: true,
+					content: [{ type: "text" as const, text: "Memory not found." }],
+				};
+			}
+
+			deleteMemory(args.id);
+
+			try {
+				await deletePoint(args.id);
+			} catch (err) {
+				log.warn("Qdrant delete failed for {id}: {error}", {
+					id: args.id,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+
+			return {
+				content: [{ type: "text" as const, text: JSON.stringify({ id: args.id, deleted: true }) }],
+			};
 		},
 	);
 

@@ -357,6 +357,16 @@ export function getMemory(id: string): MemoryRow | undefined {
 	return db.query<MemoryRow, [string]>("SELECT * FROM memories WHERE id = ?").get(id) ?? undefined;
 }
 
+export function getMemoryForUser(id: string, userId: string): MemoryRow | undefined {
+	return (
+		db
+			.query<MemoryRow, [string, string]>(
+				"SELECT m.* FROM memories m JOIN api_keys k ON m.api_key_id = k.id WHERE m.id = ? AND k.user_id = ?",
+			)
+			.get(id, userId) ?? undefined
+	);
+}
+
 export function listMemories(opts?: {
 	gitRemote?: string;
 	scope?: string;
