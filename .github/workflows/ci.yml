@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "*.md"
+      - "LICENSE"
+      - "demo.gif"
+      - ".gitignore"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install UI dependencies
+        run: cd server/ui && bun install --frozen-lockfile
+
+      - name: Lint
+        run: cd server && bun run check
+
+      - name: Type check
+        run: cd server && bun x tsc -b --noEmit
+
+      - name: Test
+        run: cd server && bun test
+
+      - name: Build UI
+        run: cd server && bun run build:ui
