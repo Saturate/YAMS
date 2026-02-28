@@ -198,8 +198,8 @@ function SessionCaptureSettings() {
 							</SelectContent>
 						</Select>
 						<p className="text-xs text-muted-foreground">
-							Simple mode only stores memories when explicitly requested. Full mode
-							auto-captures session data via hooks.
+							Simple mode only stores memories when explicitly requested. Full mode auto-captures
+							session data via hooks.
 						</p>
 					</div>
 
@@ -294,9 +294,7 @@ function SessionCaptureSettings() {
 							<Input
 								id="compression-base-url"
 								className="w-72"
-								placeholder={
-									settings.compression_base_url ?? "https://openrouter.ai/api/v1"
-								}
+								placeholder={settings.compression_base_url ?? "https://openrouter.ai/api/v1"}
 								value={compressionBaseUrl}
 								onChange={(e) => setCompressionBaseUrl(e.target.value)}
 							/>
@@ -345,9 +343,9 @@ function HooksConfigSection() {
 			<h3 className="mb-4 text-lg font-medium">Hooks Configuration</h3>
 			<p className="mb-4 text-sm text-muted-foreground">
 				Copy the hooks config for an API key and paste it into your{" "}
-				<code className="rounded bg-muted px-1 py-0.5 text-xs">.claude/settings.json</code>.
-				Set the <code className="rounded bg-muted px-1 py-0.5 text-xs">YAMS_API_KEY</code>{" "}
-				environment variable to your raw API key.
+				<code className="rounded bg-muted px-1 py-0.5 text-xs">.claude/settings.json</code>. Set the{" "}
+				<code className="rounded bg-muted px-1 py-0.5 text-xs">YAMS_API_KEY</code> environment
+				variable to your raw API key.
 			</p>
 			{keysQuery.isLoading ? (
 				<p className="text-sm text-muted-foreground">Loading keys...</p>
@@ -362,15 +360,9 @@ function HooksConfigSection() {
 							<CardContent className="flex items-center justify-between py-3">
 								<div>
 									<span className="font-medium">{k.label}</span>
-									<span className="ml-2 text-sm text-muted-foreground">
-										({k.key_prefix}...)
-									</span>
+									<span className="ml-2 text-sm text-muted-foreground">({k.key_prefix}...)</span>
 								</div>
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => copyHooksConfig(k)}
-								>
+								<Button size="sm" variant="outline" onClick={() => copyHooksConfig(k)}>
 									{copiedKeyId === k.id ? (
 										<>
 											<Check className="mr-1 h-3 w-3" /> Copied

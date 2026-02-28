@@ -17,7 +17,10 @@ export function InvitePage() {
 
 	const inviteQuery = useQuery({
 		queryKey: ["invite", token],
-		queryFn: () => api.validateInvite(token!),
+		queryFn: () => {
+			if (!token) throw new Error("unreachable");
+			return api.validateInvite(token);
+		},
 		enabled: Boolean(token),
 		retry: false,
 	});
@@ -83,13 +86,7 @@ export function InvitePage() {
 			<form onSubmit={handleSubmit} className="space-y-4">
 				<div className="space-y-2">
 					<Label htmlFor="username">Username</Label>
-					<Input
-						id="username"
-						name="username"
-						required
-						minLength={3}
-						autoComplete="username"
-					/>
+					<Input id="username" name="username" required minLength={3} autoComplete="username" />
 				</div>
 				<div className="space-y-2">
 					<Label htmlFor="password">Password</Label>

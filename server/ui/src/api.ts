@@ -319,9 +319,7 @@ export const api = {
 	// --- Invites (public) ---
 
 	validateInvite(token: string) {
-		return request<ValidateInviteResponse>(
-			`/api/invites/${encodeURIComponent(token)}/validate`,
-		);
+		return request<ValidateInviteResponse>(`/api/invites/${encodeURIComponent(token)}/validate`);
 	},
 
 	acceptInvite(token: string, username: string, password: string) {
@@ -352,16 +350,13 @@ export const api = {
 	},
 
 	getSession(id: string) {
-		return request<SessionDetailResponse>(
-			`/api/admin/sessions/${encodeURIComponent(id)}`,
-		);
+		return request<SessionDetailResponse>(`/api/admin/sessions/${encodeURIComponent(id)}`);
 	},
 
 	deleteSession(id: string) {
-		return request<{ id: string; deleted: true }>(
-			`/api/admin/sessions/${encodeURIComponent(id)}`,
-			{ method: "DELETE" },
-		);
+		return request<{ id: string; deleted: true }>(`/api/admin/sessions/${encodeURIComponent(id)}`, {
+			method: "DELETE",
+		});
 	},
 
 	// --- Settings ---
@@ -380,8 +375,6 @@ export const api = {
 	// --- Hooks config ---
 
 	getHooksConfig(keyId: string) {
-		return request<HooksConfigResponse>(
-			`/api/keys/${encodeURIComponent(keyId)}/hooks-config`,
-		);
+		return request<HooksConfigResponse>(`/api/keys/${encodeURIComponent(keyId)}/hooks-config`);
 	},
 };

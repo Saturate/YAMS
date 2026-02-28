@@ -43,7 +43,10 @@ export function SessionsPage() {
 
 	const detailQuery = useQuery({
 		queryKey: ["sessions", "detail", expandedId],
-		queryFn: () => api.getSession(expandedId!),
+		queryFn: () => {
+			if (!expandedId) throw new Error("unreachable");
+			return api.getSession(expandedId);
+		},
 		enabled: expandedId !== null,
 	});
 
@@ -120,9 +123,7 @@ export function SessionsPage() {
 												variant="ghost"
 												className="h-6 w-6"
 												aria-label={expandedId === s.id ? "Collapse" : "Expand"}
-												onClick={() =>
-													setExpandedId(expandedId === s.id ? null : s.id)
-												}
+												onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
 											>
 												{expandedId === s.id ? (
 													<ChevronUp className="h-4 w-4" />
@@ -135,9 +136,7 @@ export function SessionsPage() {
 											{s.project ?? "\u2014"}
 										</TableCell>
 										<TableCell>
-											<Badge
-												variant={s.status === "active" ? "default" : "secondary"}
-											>
+											<Badge variant={s.status === "active" ? "default" : "secondary"}>
 												{s.status}
 											</Badge>
 										</TableCell>
@@ -166,13 +165,9 @@ export function SessionsPage() {
 										<TableRow key={`${s.id}-detail`}>
 											<TableCell colSpan={7} className="bg-muted/50 p-4">
 												{detailQuery.isLoading ? (
-													<p className="text-sm text-muted-foreground">
-														Loading observations...
-													</p>
+													<p className="text-sm text-muted-foreground">Loading observations...</p>
 												) : detailQuery.data?.observations.length === 0 ? (
-													<p className="text-sm text-muted-foreground">
-														No observations.
-													</p>
+													<p className="text-sm text-muted-foreground">No observations.</p>
 												) : (
 													<div className="space-y-2">
 														<p className="text-xs font-medium uppercase text-muted-foreground">
@@ -184,17 +179,11 @@ export function SessionsPage() {
 																	key={o.id}
 																	className="flex items-start gap-2 rounded border bg-background px-3 py-2 text-sm"
 																>
-																	<Badge
-																		variant="outline"
-																		className="shrink-0 text-xs"
-																	>
+																	<Badge variant="outline" className="shrink-0 text-xs">
 																		{o.event}
 																	</Badge>
 																	{o.tool_name && (
-																		<Badge
-																			variant="secondary"
-																			className="shrink-0 text-xs"
-																		>
+																		<Badge variant="secondary" className="shrink-0 text-xs">
 																			{o.tool_name}
 																		</Badge>
 																	)}
