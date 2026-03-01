@@ -5,8 +5,7 @@ A project is never done, so here goes the road map. Might be implemented in this
 - Better Memory Capture
 - ~~Memory deletion via MCP tool (not just UI)~~
 - Sensitive data filtering before storage (<private> tags, configurable regex patterns, for api keys ect.)
-- Encryption of data at rest
-- Retention policy (memory TTL)
+- ~~Retention policy (memory TTL)~~
 - More embedding examples, should be able to be whatever configured
 - Doc's site using fumadocs
 - ~~Token-budgeted retrieval — MCP tool takes a max_tokens param. YAMS returns the most relevant memories that fit within budget. The caller doesn't have to guess how many results to ask for.~~

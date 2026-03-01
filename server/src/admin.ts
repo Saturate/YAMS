@@ -231,6 +231,10 @@ const CONFIG_KEYS = [
 	"session_context_count",
 	"privacy_patterns",
 	"dedup_threshold",
+	"ttl_default_session",
+	"ttl_default_project",
+	"ttl_default_global",
+	"ttl_max",
 ] as const;
 
 admin.get("/settings", (c) => {
@@ -333,6 +337,21 @@ admin.put("/settings", async (c) => {
 			const num = Number(value);
 			if (!Number.isFinite(num) || num < 0.5 || num > 1.0) {
 				return c.json({ error: "dedup_threshold must be a number between 0.5 and 1.0." }, 400);
+			}
+		}
+		if (
+			(key === "ttl_default_session" ||
+				key === "ttl_default_project" ||
+				key === "ttl_default_global" ||
+				key === "ttl_max") &&
+			value !== null
+		) {
+			const num = Number(value);
+			if (!Number.isInteger(num) || num < 3600 || num > 31536000) {
+				return c.json(
+					{ error: `${key} must be an integer between 3600 (1 hour) and 31536000 (365 days).` },
+					400,
+				);
 			}
 		}
 

@@ -22,6 +22,51 @@ function getDedupThreshold(): number {
 	return Math.min(Math.max(num, 0.5), 1.0);
 }
 
+const TTL_DEFAULTS: Record<string, string | undefined> = {
+	session: "2592000",
+	project: "7776000",
+	global: undefined,
+};
+
+function getScopeTtl(scope: string): number | null {
+	const key = `ttl_default_${scope}` as const;
+	const envVar = `YAMS_TTL_DEFAULT_${scope.toUpperCase()}`;
+	const str = getConfigWithEnv(key, envVar) ?? TTL_DEFAULTS[scope];
+	if (!str) return null;
+	const num = Number(str);
+	return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function getTtlMax(): number | null {
+	const str = getConfigWithEnv("ttl_max", "YAMS_TTL_MAX");
+	if (!str) return null;
+	const num = Number(str);
+	return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+export function resolveExpiresAt(ttl: number | null | undefined, scope: string): string | null {
+	let seconds: number | null;
+
+	if (ttl === null) {
+		// Explicit null = forever
+		seconds = null;
+	} else if (ttl !== undefined && ttl > 0) {
+		seconds = ttl;
+	} else {
+		// 0 or undefined = scope default
+		seconds = getScopeTtl(scope);
+	}
+
+	const max = getTtlMax();
+	if (max !== null) {
+		// Ceiling: cap any TTL (even "forever") to the admin max
+		seconds = seconds === null ? max : Math.min(seconds, max);
+	}
+
+	if (seconds === null) return null;
+	return new Date(Date.now() + seconds * 1000).toISOString();
+}
+
 interface StoreMemoryParams {
 	summary: string;
 	apiKeyId: string;
@@ -32,6 +77,7 @@ interface StoreMemoryParams {
 	metadata?: Record<string, unknown> | null;
 	force?: boolean;
 	replace?: string;
+	ttl?: number | null;
 }
 
 interface StoredMemory {
@@ -40,6 +86,7 @@ interface StoredMemory {
 	scope: string;
 	git_remote: string | null;
 	created_at: string;
+	expires_at: string | null;
 }
 
 export interface DuplicateMemory {
@@ -68,6 +115,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 
 	const gitRemote = params.gitRemote?.trim() || null;
 	const metadata = params.metadata ? JSON.stringify(params.metadata) : null;
+	const expiresAt = resolveExpiresAt(params.ttl, scope);
 
 	let vector: number[];
 	try {
@@ -94,6 +142,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 				scope,
 				api_key_label: params.apiKeyLabel,
 				created_at: existing.created_at,
+				expires_at: expiresAt,
 			});
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
@@ -106,6 +155,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 			scope,
 			git_remote: gitRemote,
 			created_at: existing.created_at,
+			expires_at: expiresAt,
 		};
 	}
 
@@ -140,6 +190,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 		scope,
 		summary: params.summary,
 		metadata,
+		expiresAt,
 	});
 
 	try {
@@ -150,13 +201,21 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 			scope,
 			api_key_label: params.apiKeyLabel,
 			created_at: createdAt,
+			expires_at: expiresAt,
 		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : "Unknown error";
 		throw new StoreMemoryError(`Vector storage error: ${message}`, "vector");
 	}
 
-	return { id, summary: params.summary, scope, git_remote: gitRemote, created_at: createdAt };
+	return {
+		id,
+		summary: params.summary,
+		scope,
+		git_remote: gitRemote,
+		created_at: createdAt,
+		expires_at: expiresAt,
+	};
 }
 
 export class StoreMemoryError extends Error {
@@ -177,6 +236,7 @@ interface IngestBody {
 	metadata?: Record<string, unknown>;
 	force?: boolean;
 	replace?: string;
+	ttl?: number | null;
 }
 
 const ingest = new Hono<AppEnv>();
@@ -207,6 +267,7 @@ ingest.post("/", async (c) => {
 			metadata: body.metadata,
 			force: body.force,
 			replace: body.replace,
+			ttl: body.ttl,
 		});
 
 		if (isDuplicate(result)) {

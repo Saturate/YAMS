@@ -116,6 +116,15 @@ export function initDb(path?: string): Database {
 	db.run("CREATE INDEX IF NOT EXISTS idx_memories_git_remote ON memories(git_remote)");
 	db.run("CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope)");
 
+	// Migration: add expires_at column to memories
+	const memCols = db.query<{ name: string }, []>("PRAGMA table_info(memories)").all();
+	if (!memCols.some((c) => c.name === "expires_at")) {
+		db.run("ALTER TABLE memories ADD COLUMN expires_at TEXT");
+	}
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at) WHERE expires_at IS NOT NULL",
+	);
+
 	db.run(`
 		CREATE TABLE IF NOT EXISTS invites (
 			id TEXT PRIMARY KEY,
@@ -330,6 +339,7 @@ export interface MemoryRow {
 	summary: string;
 	metadata: string | null;
 	created_at: string;
+	expires_at: string | null;
 }
 
 export function createMemory(params: {
@@ -339,9 +349,10 @@ export function createMemory(params: {
 	scope: string;
 	summary: string;
 	metadata?: string | null;
+	expiresAt?: string | null;
 }): string {
 	db.query(
-		"INSERT INTO memories (id, api_key_id, git_remote, scope, summary, metadata) VALUES (?, ?, ?, ?, ?, ?)",
+		"INSERT INTO memories (id, api_key_id, git_remote, scope, summary, metadata, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 	).run(
 		params.id,
 		params.apiKeyId,
@@ -349,19 +360,26 @@ export function createMemory(params: {
 		params.scope,
 		params.summary,
 		params.metadata ?? null,
+		params.expiresAt ?? null,
 	);
 	return params.id;
 }
 
+const EXPIRY_FILTER = "(m.expires_at IS NULL OR m.expires_at > datetime('now'))";
+
 export function getMemory(id: string): MemoryRow | undefined {
-	return db.query<MemoryRow, [string]>("SELECT * FROM memories WHERE id = ?").get(id) ?? undefined;
+	return (
+		db
+			.query<MemoryRow, [string]>(`SELECT * FROM memories m WHERE m.id = ? AND ${EXPIRY_FILTER}`)
+			.get(id) ?? undefined
+	);
 }
 
 export function getMemoryForUser(id: string, userId: string): MemoryRow | undefined {
 	return (
 		db
 			.query<MemoryRow, [string, string]>(
-				"SELECT m.* FROM memories m JOIN api_keys k ON m.api_key_id = k.id WHERE m.id = ? AND k.user_id = ?",
+				`SELECT m.* FROM memories m JOIN api_keys k ON m.api_key_id = k.id WHERE m.id = ? AND k.user_id = ? AND ${EXPIRY_FILTER}`,
 			)
 			.get(id, userId) ?? undefined
 	);
@@ -374,7 +392,7 @@ export function listMemories(opts?: {
 	offset?: number;
 	userId?: string;
 }): MemoryRow[] {
-	const conditions: string[] = [];
+	const conditions: string[] = [EXPIRY_FILTER];
 	const params: (string | number)[] = [];
 
 	if (opts?.gitRemote) {
@@ -395,9 +413,7 @@ export function listMemories(opts?: {
 		? "SELECT m.* FROM memories m JOIN api_keys ak ON m.api_key_id = ak.id"
 		: "SELECT * FROM memories m";
 
-	if (conditions.length > 0) {
-		sql += ` WHERE ${conditions.join(" AND ")}`;
-	}
+	sql += ` WHERE ${conditions.join(" AND ")}`;
 	sql += " ORDER BY m.created_at DESC";
 
 	const limit = opts?.limit ?? 100;
@@ -415,6 +431,22 @@ export function updateMemorySummary(id: string, summary: string): void {
 export function deleteMemory(id: string): boolean {
 	const result = db.query("DELETE FROM memories WHERE id = ?").run(id);
 	return result.changes > 0;
+}
+
+export function getExpiredMemoryIds(limit: number): string[] {
+	const rows = db
+		.query<{ id: string }, [number]>(
+			"SELECT id FROM memories WHERE expires_at IS NOT NULL AND expires_at < datetime('now') LIMIT ?",
+		)
+		.all(limit);
+	return rows.map((r) => r.id);
+}
+
+export function deleteMemoriesBatch(ids: string[]): number {
+	if (ids.length === 0) return 0;
+	const placeholders = ids.map(() => "?").join(", ");
+	const result = db.query(`DELETE FROM memories WHERE id IN (${placeholders})`).run(...ids);
+	return result.changes;
 }
 
 export function listDistinctGitRemotes(userId?: string): string[] {
@@ -454,7 +486,7 @@ export function countMemories(opts?: {
 	scope?: string;
 	userId?: string;
 }): number {
-	const conditions: string[] = [];
+	const conditions: string[] = [EXPIRY_FILTER];
 	const params: string[] = [];
 
 	if (opts?.gitRemote) {
@@ -475,9 +507,7 @@ export function countMemories(opts?: {
 		? "SELECT COUNT(*) as count FROM memories m JOIN api_keys ak ON m.api_key_id = ak.id"
 		: "SELECT COUNT(*) as count FROM memories m";
 
-	if (conditions.length > 0) {
-		sql += ` WHERE ${conditions.join(" AND ")}`;
-	}
+	sql += ` WHERE ${conditions.join(" AND ")}`;
 
 	const row = db.query<{ count: number }, string[]>(sql).get(...params);
 	return row?.count ?? 0;

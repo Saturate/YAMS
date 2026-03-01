@@ -41,6 +41,7 @@ export interface MemoryPayload {
 	scope: string;
 	api_key_label: string;
 	created_at: string;
+	expires_at: string | null;
 }
 
 export async function upsertMemory(

@@ -5,6 +5,7 @@ import { getUserCount, initDb } from "./db.js";
 import { checkOllamaModel } from "./embeddings.js";
 import { initLogging } from "./logger.js";
 import { initQdrant } from "./qdrant.js";
+import { initRetentionSweeper } from "./retention.js";
 
 await initLogging();
 
@@ -31,6 +32,7 @@ initQdrant()
 
 checkOllamaModel();
 initCompressionListener();
+initRetentionSweeper();
 runCompressionCycle().catch((err: unknown) =>
 	log.warn("Compression catch-up failed: {error}", {
 		error: err instanceof Error ? err.message : String(err),

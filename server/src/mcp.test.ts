@@ -673,6 +673,130 @@ describe("MCP server", () => {
 		const result = JSON.parse(text) as { stored: boolean };
 		expect(result.stored).toBe(true);
 	});
+
+	// --- list_memories ---
+
+	test("list_memories returns stored memories", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		await mcpCallTool(app, apiKey, "remember", {
+			content: "first memory",
+			scope: "global",
+			force: true,
+		});
+		await mcpCallTool(app, apiKey, "remember", {
+			content: "second memory",
+			scope: "global",
+			force: true,
+		});
+
+		const data = await mcpCallTool(app, apiKey, "list_memories", {});
+		const text = data.result?.content?.[0]?.text ?? "{}";
+		const result = JSON.parse(text) as { memories: unknown[]; total: number };
+		expect(result.total).toBe(2);
+		expect(result.memories).toHaveLength(2);
+	});
+
+	test("list_memories filters by scope", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		await mcpCallTool(app, apiKey, "remember", {
+			content: "session memory",
+			scope: "session",
+			force: true,
+		});
+		await mcpCallTool(app, apiKey, "remember", {
+			content: "global memory",
+			scope: "global",
+			force: true,
+		});
+
+		const data = await mcpCallTool(app, apiKey, "list_memories", { scope: "global" });
+		const text = data.result?.content?.[0]?.text ?? "{}";
+		const result = JSON.parse(text) as { memories: unknown[]; total: number };
+		expect(result.total).toBe(1);
+	});
+
+	test("list_memories respects pagination", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		for (let i = 0; i < 5; i++) {
+			await mcpCallTool(app, apiKey, "remember", {
+				content: `memory ${i}`,
+				scope: "global",
+				force: true,
+			});
+		}
+
+		const data = await mcpCallTool(app, apiKey, "list_memories", { limit: 2, offset: 0 });
+		const text = data.result?.content?.[0]?.text ?? "{}";
+		const result = JSON.parse(text) as { memories: unknown[]; total: number };
+		expect(result.memories).toHaveLength(2);
+		expect(result.total).toBe(5);
+	});
+
+	test("list_memories isolates users", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const adminKey = await createApiKey(app);
+		const adminToken = await getToken(app);
+
+		await mcpCallTool(app, adminKey, "remember", {
+			content: "admin memory",
+			scope: "global",
+			force: true,
+		});
+
+		const user = await createRegularUser(app, adminToken);
+		const userKeyRes = await app.request("/api/keys", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${user.token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ label: "user-key" }),
+		});
+		const userKey = ((await userKeyRes.json()) as { key: string }).key;
+
+		const data = await mcpCallTool(app, userKey, "list_memories", {});
+		const text = data.result?.content?.[0]?.text ?? "{}";
+		const result = JSON.parse(text) as { memories: unknown[]; total: number };
+		expect(result.total).toBe(0);
+	});
+
+	// --- meditate prompt ---
+
+	test("meditate prompt is registered", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		const res = await app.request("/mcp", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+				...MCP_HEADERS,
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-03-26",
+					capabilities: {},
+					clientInfo: { name: "test", version: "1.0" },
+				},
+				id: 1,
+			}),
+		});
+		const init = (await res.json()) as JsonRpcResponse;
+		expect(init.result?.capabilities?.prompts).toBeDefined();
+	});
 });
 
 describe("estimateTokens", () => {

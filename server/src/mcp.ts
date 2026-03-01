@@ -7,6 +7,7 @@ import type { ValidatedApiKey } from "./auth.js";
 import { validateBearerKey } from "./auth.js";
 import { parseSummary } from "./compression.js";
 import {
+	countMemories,
 	countObservations,
 	deleteMemory,
 	getMemoryForUser,
@@ -15,6 +16,7 @@ import {
 	getSessionFilesModified,
 	getSessionForUser,
 	listDistinctGitRemotes,
+	listMemories,
 	listObservations,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
@@ -96,10 +98,16 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					fetchLimit,
 				);
 
-				let memories = results.map((r) => ({
-					score: r.score,
-					...(r.payload ?? {}),
-				}));
+				const now = new Date().toISOString();
+				let memories = results
+					.filter((r) => {
+						const expiresAt = r.payload?.expires_at;
+						return !expiresAt || String(expiresAt) > now;
+					})
+					.map((r) => ({
+						score: r.score,
+						...(r.payload ?? {}),
+					}));
 
 				if (args.max_tokens) {
 					memories = fitTokenBudget(memories, args.max_tokens);
@@ -145,6 +153,14 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					.string()
 					.optional()
 					.describe("ID of an existing memory to overwrite with new content"),
+				ttl: z
+					.number()
+					.int()
+					.min(0)
+					.optional()
+					.describe(
+						"TTL in seconds. 0 or omitted = scope default (session: 30d, project: 90d, global: forever).",
+					),
 			},
 		},
 		async (args) => {
@@ -158,6 +174,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					scope: args.scope,
 					force: args.force,
 					replace: args.replace,
+					ttl: args.ttl,
 				});
 
 				if (isDuplicate(result)) {
@@ -252,6 +269,45 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					{
 						type: "text" as const,
 						text: JSON.stringify({ projects }, null, 2),
+					},
+				],
+			};
+		},
+	);
+
+	server.registerTool(
+		"list_memories",
+		{
+			description:
+				"List all memories, optionally filtered by project and/or scope. Returns full memory objects with IDs. Use for auditing, cleanup, or bulk review. Cost: DB read only, no LLM.",
+			inputSchema: {
+				project: z.string().optional().describe("Filter by git remote / project"),
+				scope: z.enum(["session", "project", "global"]).optional().describe("Filter by scope"),
+				limit: z.number().int().min(1).max(200).optional().describe("Max results (default 50)"),
+				offset: z.number().int().min(0).optional().describe("Pagination offset (default 0)"),
+			},
+		},
+		(args) => {
+			const limit = args.limit ?? 50;
+			const offset = args.offset ?? 0;
+			const memories = listMemories({
+				gitRemote: args.project,
+				scope: args.scope,
+				limit,
+				offset,
+				userId: apiKey.user_id,
+			});
+			const total = countMemories({
+				gitRemote: args.project,
+				scope: args.scope,
+				userId: apiKey.user_id,
+			});
+
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify({ memories, total, limit, offset }, null, 2),
 					},
 				],
 			};
@@ -464,6 +520,55 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 							null,
 							2,
 						),
+					},
+				],
+			};
+		},
+	);
+
+	server.registerPrompt(
+		"meditate",
+		{
+			title: "Meditate",
+			description:
+				"Review and clean up your memories for a project or scope. Finds duplicates, contradictions, stale info, and overly verbose memories — then consolidates them.",
+			argsSchema: {
+				project: z.string().optional().describe("Git remote / project to focus on"),
+				scope: z.enum(["session", "project", "global"]).optional().describe("Scope to review"),
+			},
+		},
+		(args) => {
+			const filters: string[] = [];
+			if (args.project) filters.push(`project: ${args.project}`);
+			if (args.scope) filters.push(`scope: ${args.scope}`);
+			const filterDesc = filters.length > 0 ? filters.join(", ") : "all memories";
+
+			return {
+				messages: [
+					{
+						role: "user" as const,
+						content: {
+							type: "text" as const,
+							text: `Review and clean up my YAMS memories (${filterDesc}). Follow these steps:
+
+1. Use list_memories to fetch all memories${args.project ? ` for project "${args.project}"` : ""}${args.scope ? ` with scope "${args.scope}"` : ""}. Page through all results if there are more than the limit.
+
+2. Analyze the memories and identify:
+   - **Duplicates**: memories saying essentially the same thing
+   - **Contradictions**: memories that conflict with each other (keep the newer one)
+   - **Stale**: memories about things that are no longer true or relevant
+   - **Verbose**: memories that could be said in fewer words without losing meaning
+
+3. For each issue found, take action:
+   - Duplicates → keep the best one, use forget to delete the others
+   - Contradictions → keep the most recent, forget the outdated one
+   - Stale → forget them
+   - Verbose → use remember with replace to rewrite them more concisely
+
+4. Give me a summary of what you did: how many memories before/after, what was removed/rewritten, and why.
+
+Be conservative — when in doubt, keep the memory. Only remove things you're confident are duplicates or clearly stale.`,
+						},
 					},
 				],
 			};
