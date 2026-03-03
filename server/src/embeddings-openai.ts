@@ -23,13 +23,13 @@ export class OpenAICompatibleProvider implements EmbeddingProvider {
 	constructor(options?: { name?: string; defaultBaseUrl?: string; defaultModel?: string }) {
 		this.name = options?.name ?? "openai";
 		this.baseUrl =
-			process.env.HUSK_EMBED_BASE_URL ?? options?.defaultBaseUrl ?? "https://api.openai.com/v1";
+			process.env.HUSK_EMBED_URL ?? options?.defaultBaseUrl ?? "https://api.openai.com/v1";
 		this.model = process.env.HUSK_EMBED_MODEL ?? options?.defaultModel ?? "text-embedding-3-small";
-		this.apiKey = process.env.OPENAI_API_KEY ?? null;
-		this.dimensions = Number(process.env.EMBEDDING_DIMENSIONS) || 1536;
+		this.apiKey = process.env.HUSK_EMBED_API_KEY ?? null;
+		this.dimensions = Number(process.env.HUSK_EMBED_DIMENSIONS) || 1536;
 
 		if (this.baseUrl.startsWith("https://api.openai.com") && !this.apiKey) {
-			throw new Error("OPENAI_API_KEY is required for the OpenAI embedding provider");
+			throw new Error("HUSK_EMBED_API_KEY is required for the OpenAI embedding provider");
 		}
 	}
 

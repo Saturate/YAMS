@@ -17,13 +17,13 @@ export class VoyageProvider implements EmbeddingProvider {
 	private readonly apiKey: string;
 
 	constructor() {
-		const key = process.env.VOYAGE_API_KEY;
+		const key = process.env.HUSK_EMBED_API_KEY;
 		if (!key) {
-			throw new Error("VOYAGE_API_KEY is required for the Voyage embedding provider");
+			throw new Error("HUSK_EMBED_API_KEY is required for the Voyage embedding provider");
 		}
 		this.apiKey = key;
 		this.model = process.env.HUSK_EMBED_MODEL ?? "voyage-3.5";
-		this.dimensions = Number(process.env.EMBEDDING_DIMENSIONS) || 1024;
+		this.dimensions = Number(process.env.HUSK_EMBED_DIMENSIONS) || 1024;
 	}
 
 	async embed(text: string): Promise<number[]> {

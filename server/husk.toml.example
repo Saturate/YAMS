@@ -1,0 +1,34 @@
+# HUSK Configuration
+# Environment variables always override these values.
+# Copy to husk.toml and uncomment the settings you need.
+
+[server]
+# port = 3000
+# db_path = "data/husk.db"
+# jwt_secret = ""
+
+[storage]
+# backend = "qdrant"             # qdrant | sqlite-vec
+# url = "http://localhost:6333"  # qdrant endpoint
+# path = "data/husk-vectors.db" # sqlite-vec file path
+# custom_sqlite = ""            # path to custom libsqlite3 (macOS)
+
+[embeddings]
+# backend = "ollama"             # ollama | transformers | voyage | openai | llamacpp
+# url = ""                       # provider endpoint (each has a sensible default)
+# model = ""                     # model name (each has a sensible default)
+# api_key = ""                   # required for voyage, openai
+# dimensions = 0                 # 0 = provider default
+# models_path = "data/models"   # transformers model cache
+
+[compression]
+# provider = "anthropic"         # anthropic | openrouter | ollama
+# api_key = ""
+# model = ""
+# url = ""
+# mode = "client"                # client | server
+
+[auth]
+# github_client_id = ""
+# github_client_secret = ""
+# oauth_allowed_orgs = ""

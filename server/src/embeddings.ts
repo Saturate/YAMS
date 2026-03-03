@@ -23,13 +23,13 @@ class OllamaProvider implements EmbeddingProvider {
 	readonly name = "ollama";
 
 	constructor() {
-		this.url = process.env.OLLAMA_URL ?? "http://localhost:11434";
-		this.model = process.env.OLLAMA_MODEL ?? "nomic-embed-text";
+		this.url = process.env.HUSK_EMBED_URL ?? "http://localhost:11434";
+		this.model = process.env.HUSK_EMBED_MODEL ?? "nomic-embed-text";
 	}
 
 	get dimensions(): number {
 		if (this.cachedDimensions) return this.cachedDimensions;
-		return Number(process.env.EMBEDDING_DIMENSIONS) || 768;
+		return Number(process.env.HUSK_EMBED_DIMENSIONS) || 768;
 	}
 
 	async embed(text: string): Promise<number[]> {
@@ -91,8 +91,8 @@ export function setProvider(p: EmbeddingProvider) {
 }
 
 export async function checkOllamaModel(): Promise<void> {
-	const url = process.env.OLLAMA_URL ?? "http://localhost:11434";
-	const model = process.env.OLLAMA_MODEL ?? "nomic-embed-text";
+	const url = process.env.HUSK_EMBED_URL ?? "http://localhost:11434";
+	const model = process.env.HUSK_EMBED_MODEL ?? "nomic-embed-text";
 
 	try {
 		const res = await fetch(`${url}/api/tags`);

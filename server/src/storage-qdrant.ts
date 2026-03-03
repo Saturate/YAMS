@@ -15,7 +15,7 @@ export class QdrantStorageProvider implements StorageProvider {
 	private client: QdrantClient | null = null;
 
 	async init(dimensions: number): Promise<void> {
-		const url = process.env.QDRANT_URL ?? "http://localhost:6333";
+		const url = process.env.HUSK_STORAGE_URL ?? "http://localhost:6333";
 		this.client = new QdrantClient({ url });
 
 		const collections = await this.client.getCollections();

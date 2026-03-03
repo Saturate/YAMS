@@ -20,7 +20,7 @@ const log = getLogger(["husk", "storage-sqlite-vec"]);
 export function ensureSqliteExtensionSupport(): void {
 	if (process.platform !== "darwin") return;
 
-	const customPath = process.env.HUSK_CUSTOM_SQLITE;
+	const customPath = process.env.HUSK_STORAGE_CUSTOM_SQLITE;
 	if (customPath) {
 		try {
 			Database.setCustomSQLite(customPath);
@@ -68,7 +68,7 @@ export class SqliteVecStorageProvider implements StorageProvider {
 
 	async init(dimensions: number): Promise<void> {
 		this.dimensions = dimensions;
-		const dbPath = process.env.HUSK_VEC_DB_PATH ?? "data/husk-vectors.db";
+		const dbPath = process.env.HUSK_STORAGE_PATH ?? "data/husk-vectors.db";
 
 		if (dbPath !== ":memory:") {
 			mkdirSync(dirname(dbPath), { recursive: true });

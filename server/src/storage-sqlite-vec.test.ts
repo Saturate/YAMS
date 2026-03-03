@@ -45,7 +45,7 @@ describe.if(sqliteVecAvailable)("SqliteVecStorageProvider", () => {
 
 	beforeEach(async () => {
 		provider = new SqliteVecStorageProvider();
-		process.env.HUSK_VEC_DB_PATH = ":memory:";
+		process.env.HUSK_STORAGE_PATH = ":memory:";
 		await provider.init(DIMS);
 	});
 

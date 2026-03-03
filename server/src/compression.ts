@@ -113,7 +113,9 @@ class AnthropicProvider implements CompressionProvider {
 	}
 
 	private get model(): string {
-		return getConfig("compression_model") ?? "claude-haiku-4-5-20251001";
+		return (
+			getConfigWithEnv("compression_model", "HUSK_COMPRESSION_MODEL") ?? "claude-haiku-4-5-20251001"
+		);
 	}
 
 	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {
@@ -165,11 +167,17 @@ class OpenRouterProvider implements CompressionProvider {
 	}
 
 	private get model(): string {
-		return getConfig("compression_model") ?? "anthropic/claude-haiku-4-5-20251001";
+		return (
+			getConfigWithEnv("compression_model", "HUSK_COMPRESSION_MODEL") ??
+			"anthropic/claude-haiku-4-5-20251001"
+		);
 	}
 
 	private get baseUrl(): string {
-		return getConfig("compression_base_url") ?? "https://openrouter.ai/api/v1";
+		return (
+			getConfigWithEnv("compression_base_url", "HUSK_COMPRESSION_URL") ??
+			"https://openrouter.ai/api/v1"
+		);
 	}
 
 	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {
@@ -211,11 +219,13 @@ class OllamaProvider implements CompressionProvider {
 	readonly name = "ollama";
 
 	private get url(): string {
-		return process.env.OLLAMA_URL ?? "http://localhost:11434";
+		return (
+			getConfigWithEnv("compression_base_url", "HUSK_COMPRESSION_URL") ?? "http://localhost:11434"
+		);
 	}
 
 	private get model(): string {
-		return getConfig("compression_model") ?? "llama3.2";
+		return getConfigWithEnv("compression_model", "HUSK_COMPRESSION_MODEL") ?? "llama3.2";
 	}
 
 	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {

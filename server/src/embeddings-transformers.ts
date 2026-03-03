@@ -21,7 +21,7 @@ export class TransformersProvider implements EmbeddingProvider {
 
 	constructor() {
 		this.model = process.env.HUSK_EMBED_MODEL ?? DEFAULT_MODEL;
-		this.dimensions = Number(process.env.EMBEDDING_DIMENSIONS) || DEFAULT_DIMS;
+		this.dimensions = Number(process.env.HUSK_EMBED_DIMENSIONS) || DEFAULT_DIMS;
 	}
 
 	async embed(text: string): Promise<number[]> {
@@ -54,7 +54,7 @@ export class TransformersProvider implements EmbeddingProvider {
 		const { pipeline, env } = await import("@huggingface/transformers");
 
 		// Cache models alongside other HUSK data
-		env.cacheDir = process.env.HUSK_MODELS_PATH ?? "data/models";
+		env.cacheDir = process.env.HUSK_EMBED_MODELS_PATH ?? "data/models";
 
 		const pipe = await pipeline("feature-extraction", this.model, {
 			dtype: "q8",
