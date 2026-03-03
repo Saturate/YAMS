@@ -2,12 +2,18 @@ import { getLogger } from "@logtape/logtape";
 import { app } from "./app.js";
 import { initCompressionListener, runCompressionCycle } from "./compression.js";
 import { getUserCount, initDb } from "./db.js";
-import { checkOllamaModel } from "./embeddings.js";
+import { checkOllamaModel, getProvider } from "./embeddings.js";
 import { initLogging } from "./logger.js";
-import { initQdrant } from "./qdrant.js";
 import { initRetentionSweeper } from "./retention.js";
+import { initStorage } from "./storage.js";
 
 await initLogging();
+
+// sqlite-vec on macOS needs Homebrew SQLite — must happen before any Database is created
+if (process.env.HUSK_STORAGE === "sqlite-vec") {
+	const { ensureSqliteExtensionSupport } = await import("./storage-sqlite-vec.js");
+	ensureSqliteExtensionSupport();
+}
 
 initDb();
 
@@ -22,10 +28,10 @@ if (userCount === 0) {
 	log.info("Ready ({userCount} user(s) configured)", { userCount });
 }
 
-initQdrant()
-	.then(() => log.info("Qdrant connected"))
+initStorage(getProvider().dimensions)
+	.then(() => log.info("Vector storage ready"))
 	.catch((err: unknown) =>
-		log.warn("Qdrant not available - ingest will fail until it's running: {error}", {
+		log.warn("Vector storage not available - ingest will fail until it's running: {error}", {
 			error: err instanceof Error ? err.message : String(err),
 		}),
 	);

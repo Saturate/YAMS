@@ -24,7 +24,7 @@ import {
 import { getProvider } from "./embeddings.js";
 import type { AppEnv } from "./env.js";
 import { resetPrivacyCache } from "./privacy.js";
-import { deletePoint, searchMemories } from "./qdrant.js";
+import { getStorageProvider } from "./storage.js";
 
 const log = getLogger(["husk", "admin"]);
 
@@ -88,7 +88,7 @@ admin.post("/search", async (c) => {
 		if (body.scope) filter.scope = body.scope;
 		if (!isAdmin) filter.user_id = c.get("userId");
 
-		const results = await searchMemories(
+		const results = await getStorageProvider().search(
 			vector,
 			Object.keys(filter).length > 0 ? filter : undefined,
 			limit,
@@ -97,7 +97,7 @@ admin.post("/search", async (c) => {
 		// Enrich with full memory data from SQLite
 		const memories = results
 			.map((r) => {
-				const memory = getMemory(String(r.id));
+				const memory = getMemory(r.id);
 				if (!memory) return null;
 				return { score: r.score, ...memory };
 			})
@@ -145,9 +145,9 @@ admin.delete("/memories/:id", async (c) => {
 	deleteMemory(id);
 
 	try {
-		await deletePoint(id);
+		await getStorageProvider().delete(id);
 	} catch (err) {
-		log.warn("Qdrant delete failed for {id}: {error}", {
+		log.warn("Vector delete failed for {id}: {error}", {
 			id,
 			error: err instanceof Error ? err.message : String(err),
 		});

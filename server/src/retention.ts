@@ -1,6 +1,6 @@
 import { getLogger } from "@logtape/logtape";
 import { deleteMemoriesBatch, getExpiredMemoryIds } from "./db.js";
-import { deletePoint } from "./qdrant.js";
+import { getStorageProvider } from "./storage.js";
 
 const log = getLogger(["husk", "retention"]);
 
@@ -40,9 +40,9 @@ export async function sweepExpiredMemories(): Promise<number> {
 
 	for (const id of ids) {
 		try {
-			await deletePoint(id);
+			await getStorageProvider().delete(id);
 		} catch (err) {
-			log.warn("Qdrant delete failed for expired memory {id}: {error}", {
+			log.warn("Vector delete failed for expired memory {id}: {error}", {
 				id,
 				error: err instanceof Error ? err.message : String(err),
 			});

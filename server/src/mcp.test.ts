@@ -3,16 +3,17 @@ import { createObservation, createSession, getMemory } from "./db.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { setProvider } from "./embeddings.js";
 import { estimateTokens } from "./mcp.js";
-import { setQdrantClient } from "./qdrant.js";
+import type { StorageProvider, VectorSearchResult } from "./storage.js";
+import { setStorageProvider } from "./storage.js";
 import { createRegularUser, createTestApp, getToken, setupAdmin } from "./test-helpers.js";
 
 const mockVector = new Array(768).fill(0.1) as number[];
 const mockEmbed = mock(() => Promise.resolve(mockVector));
-const mockUpsert = mock(() => Promise.resolve({}));
-const mockDelete = mock(() => Promise.resolve({}));
+const mockUpsert = mock(() => Promise.resolve());
+const mockDelete = mock(() => Promise.resolve());
 // Default: return empty results (dedup won't trigger).
 // Tests that need search results override this via mockSearch.mockImplementation()
-const mockSearch = mock(() => Promise.resolve([] as unknown[]));
+const mockSearch = mock(() => Promise.resolve([] as VectorSearchResult[]));
 
 const mockProvider: EmbeddingProvider = {
 	name: "mock",
@@ -20,12 +21,14 @@ const mockProvider: EmbeddingProvider = {
 	embed: mockEmbed,
 };
 
-const mockQdrantClient = {
-	getCollections: () => Promise.resolve({ collections: [{ name: "husk_memories" }] }),
+const mockStorage: StorageProvider = {
+	name: "mock",
+	init: () => Promise.resolve(),
 	upsert: mockUpsert,
 	search: mockSearch,
 	delete: mockDelete,
-} as unknown as import("@qdrant/js-client-rest").QdrantClient;
+	healthy: () => Promise.resolve(true),
+};
 
 async function createApiKey(app: ReturnType<typeof createTestApp>, jwtToken?: string) {
 	const token = jwtToken ?? (await getToken(app));
@@ -121,17 +124,17 @@ async function mcpCallTool(
 describe("MCP server", () => {
 	beforeEach(() => {
 		setProvider(mockProvider);
-		setQdrantClient(mockQdrantClient);
+		setStorageProvider(mockStorage);
 		mockEmbed.mockClear();
 		mockUpsert.mockClear();
 		mockDelete.mockClear();
 		mockSearch.mockReset();
-		mockSearch.mockImplementation(() => Promise.resolve([] as unknown[]));
+		mockSearch.mockImplementation(() => Promise.resolve([] as VectorSearchResult[]));
 	});
 
 	afterEach(() => {
 		setProvider(mockProvider);
-		setQdrantClient(null);
+		setStorageProvider(null);
 	});
 
 	test("rejects missing auth", async () => {
@@ -170,7 +173,6 @@ describe("MCP server", () => {
 			Promise.resolve([
 				{
 					id: "pt-1",
-					version: 1,
 					score: 0.95,
 					payload: {
 						memory_id: "mem-1",
@@ -214,16 +216,10 @@ describe("MCP server", () => {
 
 		expect(mockSearch).toHaveBeenCalledTimes(1);
 		const searchCall = mockSearch.mock.calls[0] as unknown[];
-		expect(searchCall[0]).toBe("husk_memories");
-		const searchParams = searchCall[1] as Record<string, unknown>;
-		const filter = searchParams.filter as {
-			must: Array<{ key: string; match: { value: string } }>;
-		};
-		expect(filter.must).toContainEqual({ key: "scope", match: { value: "project" } });
-		expect(filter.must).toContainEqual({
-			key: "git_remote",
-			match: { value: "github.com/org/repo" },
-		});
+		// StorageProvider.search(vector, filter, limit)
+		const filter = searchCall[1] as { scope?: string; git_remote?: string; user_id?: string };
+		expect(filter.scope).toBe("project");
+		expect(filter.git_remote).toBe("github.com/org/repo");
 	});
 
 	test("remember tool stores a memory", async () => {
@@ -398,18 +394,13 @@ describe("MCP server", () => {
 
 	test("search with max_tokens returns memories within budget", async () => {
 		// Mock returns 3 results with summaries of known length
-		const multiResultSearch = mock(() =>
+		mockSearch.mockImplementation(() =>
 			Promise.resolve([
-				{ id: "1", version: 1, score: 0.9, payload: { summary: "a".repeat(100) } },
-				{ id: "2", version: 1, score: 0.8, payload: { summary: "b".repeat(100) } },
-				{ id: "3", version: 1, score: 0.7, payload: { summary: "c".repeat(100) } },
+				{ id: "1", score: 0.9, payload: { summary: "a".repeat(100) } },
+				{ id: "2", score: 0.8, payload: { summary: "b".repeat(100) } },
+				{ id: "3", score: 0.7, payload: { summary: "c".repeat(100) } },
 			]),
 		);
-		setQdrantClient({
-			getCollections: () => Promise.resolve({ collections: [{ name: "husk_memories" }] }),
-			upsert: mockUpsert,
-			search: multiResultSearch,
-		} as unknown as import("@qdrant/js-client-rest").QdrantClient);
 
 		const app = createTestApp();
 		await setupAdmin(app);
@@ -428,16 +419,9 @@ describe("MCP server", () => {
 	});
 
 	test("search with max_tokens always returns at least one result", async () => {
-		const bigResultSearch = mock(() =>
-			Promise.resolve([
-				{ id: "1", version: 1, score: 0.9, payload: { summary: "x".repeat(1000) } },
-			]),
+		mockSearch.mockImplementation(() =>
+			Promise.resolve([{ id: "1", score: 0.9, payload: { summary: "x".repeat(1000) } }]),
 		);
-		setQdrantClient({
-			getCollections: () => Promise.resolve({ collections: [{ name: "husk_memories" }] }),
-			upsert: mockUpsert,
-			search: bigResultSearch,
-		} as unknown as import("@qdrant/js-client-rest").QdrantClient);
 
 		const app = createTestApp();
 		await setupAdmin(app);
@@ -462,8 +446,8 @@ describe("MCP server", () => {
 
 		expect(mockSearch).toHaveBeenCalledTimes(1);
 		const searchCall = mockSearch.mock.calls[0] as unknown[];
-		const searchParams = searchCall[1] as Record<string, unknown>;
-		expect(searchParams.limit).toBe(5);
+		// StorageProvider.search(vector, filter, limit)
+		expect(searchCall[2]).toBe(5);
 	});
 
 	test("get_observation returns full observation data", async () => {
@@ -554,7 +538,6 @@ describe("MCP server", () => {
 			Promise.resolve([
 				{
 					id: firstResult.id,
-					version: 1,
 					score: 0.95,
 					payload: { memory_id: firstResult.id },
 				},
@@ -583,7 +566,6 @@ describe("MCP server", () => {
 			Promise.resolve([
 				{
 					id: "existing-1",
-					version: 1,
 					score: 0.99,
 					payload: { memory_id: "existing-1" },
 				},
@@ -653,7 +635,6 @@ describe("MCP server", () => {
 			Promise.resolve([
 				{
 					id: "existing-1",
-					version: 1,
 					score: 0.7,
 					payload: { memory_id: "existing-1" },
 				},
