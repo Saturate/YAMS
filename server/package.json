@@ -10,6 +10,7 @@
 		"check": "biome check ."
 	},
 	"dependencies": {
+		"@huggingface/transformers": "^3.8.1",
 		"@logtape/hono": "^2.0.2",
 		"@logtape/logtape": "^2.0.2",
 		"@modelcontextprotocol/sdk": "^1.27.0",

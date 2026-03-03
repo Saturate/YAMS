@@ -36,7 +36,9 @@ initStorage(getProvider().dimensions)
 		}),
 	);
 
-checkOllamaModel();
+if (getProvider().name === "ollama") {
+	checkOllamaModel();
+}
 initCompressionListener();
 initRetentionSweeper();
 runCompressionCycle().catch((err: unknown) =>

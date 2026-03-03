@@ -1,4 +1,5 @@
 import { getLogger } from "@logtape/logtape";
+import { TransformersProvider } from "./embeddings-transformers.js";
 
 const log = getLogger(["husk", "embeddings"]);
 
@@ -57,7 +58,15 @@ let provider: EmbeddingProvider | null = null;
 
 export function getProvider(): EmbeddingProvider {
 	if (!provider) {
-		provider = new OllamaProvider();
+		const backend = process.env.HUSK_EMBEDDINGS ?? "ollama";
+		switch (backend) {
+			case "transformers":
+				provider = new TransformersProvider();
+				break;
+			default:
+				provider = new OllamaProvider();
+				break;
+		}
 	}
 	return provider;
 }
