@@ -98,7 +98,9 @@ describe.if(sqliteVecAvailable)("SqliteVecStorageProvider", () => {
 		const results = await provider.search(queryVec, undefined, 10);
 		expect(results.length).toBeGreaterThanOrEqual(2);
 		expect(results[0]?.id).toBe("close");
-		expect(results[0]?.score).toBeGreaterThan(results[1]!.score);
+		const first = results[0]?.score ?? 0;
+		const second = results[1]?.score ?? 0;
+		expect(first).toBeGreaterThan(second);
 	});
 
 	test("search respects limit", async () => {
