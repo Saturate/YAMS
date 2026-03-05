@@ -1,4 +1,5 @@
 import defaultMdxComponents from "fumadocs-ui/mdx";
+import { D } from "@/components/detail";
 import {
 	DocsBody,
 	DocsDescription,
@@ -33,7 +34,7 @@ export default async function Page(props: {
 			<DocsTitle>{data.title}</DocsTitle>
 			<DocsDescription>{data.description}</DocsDescription>
 			<DocsBody>
-				<MDX components={{ ...defaultMdxComponents }} />
+				<MDX components={{ ...defaultMdxComponents, D }} />
 			</DocsBody>
 		</DocsPage>
 	);

@@ -3,3 +3,42 @@
 @import "fumadocs-ui/css/preset.css";
 
 @source "../node_modules/fumadocs-ui/dist/**/*.js";
+
+/* Comparison table: sticky first column for horizontal scroll */
+.comparison-table table {
+	overflow: clip;
+}
+
+.comparison-table td:not(:first-child),
+.comparison-table th:not(:first-child) {
+	text-align: center !important;
+}
+
+.comparison-table th:first-child,
+.comparison-table td:first-child {
+	position: sticky;
+	left: 0;
+	z-index: 1;
+	min-width: 10rem;
+	font-weight: 600;
+}
+
+.comparison-table th:first-child {
+	background: var(--color-fd-muted);
+	z-index: 2;
+}
+
+.comparison-table td:first-child {
+	background: var(--color-fd-card);
+}
+
+.comparison-table th:first-child::after,
+.comparison-table td:first-child::after {
+	content: "";
+	position: absolute;
+	inset-block: 0;
+	right: -6px;
+	width: 6px;
+	background: linear-gradient(to right, rgba(0, 0, 0, 0.06), transparent);
+	pointer-events: none;
+}

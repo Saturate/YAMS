@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { getMemory } from "./db.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { setProvider } from "./embeddings.js";
-import { setQdrantClient } from "./qdrant.js";
+import type { StorageProvider } from "./storage.js";
+import { setStorageProvider } from "./storage.js";
 import { createTestApp, getToken, setupAdmin } from "./test-helpers.js";
 
 const mockEmbed = mock(() => Promise.resolve(new Array(768).fill(0.1) as number[]));
-const mockUpsert = mock(() => Promise.resolve({}));
+const mockUpsert = mock(() => Promise.resolve());
 
 const mockProvider: EmbeddingProvider = {
 	name: "mock",
@@ -14,10 +15,14 @@ const mockProvider: EmbeddingProvider = {
 	embed: mockEmbed,
 };
 
-const mockQdrantClient = {
-	getCollections: () => Promise.resolve({ collections: [{ name: "husk_memories" }] }),
+const mockStorage: StorageProvider = {
+	name: "mock",
+	init: () => Promise.resolve(),
 	upsert: mockUpsert,
-} as unknown as import("@qdrant/js-client-rest").QdrantClient;
+	search: mock(() => Promise.resolve([])),
+	delete: mock(() => Promise.resolve()),
+	healthy: () => Promise.resolve(true),
+};
 
 async function createApiKey(app: ReturnType<typeof createTestApp>) {
 	const token = await getToken(app);
@@ -36,14 +41,14 @@ async function createApiKey(app: ReturnType<typeof createTestApp>) {
 describe("POST /ingest", () => {
 	beforeEach(() => {
 		setProvider(mockProvider);
-		setQdrantClient(mockQdrantClient);
+		setStorageProvider(mockStorage);
 		mockEmbed.mockClear();
 		mockUpsert.mockClear();
 	});
 
 	afterEach(() => {
 		setProvider(mockProvider);
-		setQdrantClient(null);
+		setStorageProvider(null);
 	});
 
 	test("ingests with valid key and body", async () => {
@@ -212,7 +217,7 @@ describe("POST /ingest", () => {
 		expect(mockEmbed).toHaveBeenCalledWith("embedding test");
 	});
 
-	test("calls Qdrant upsert with correct payload", async () => {
+	test("calls storage upsert with correct payload", async () => {
 		const app = createTestApp();
 		await setupAdmin(app);
 		const apiKey = await createApiKey(app);
@@ -224,7 +229,7 @@ describe("POST /ingest", () => {
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
-				summary: "qdrant test",
+				summary: "storage test",
 				git_remote: "github.com/test/repo",
 				scope: "project",
 			}),
@@ -234,13 +239,11 @@ describe("POST /ingest", () => {
 		expect(mockUpsert).toHaveBeenCalledTimes(1);
 
 		const call = mockUpsert.mock.calls[0] as unknown[];
-		expect(call[0]).toBe("husk_memories");
-		const upsertData = call[1] as { points: Array<{ payload: Record<string, unknown> }> };
-		const point = upsertData.points[0];
-		expect(point).toBeDefined();
-		expect(point?.payload.git_remote).toBe("github.com/test/repo");
-		expect(point?.payload.scope).toBe("project");
-		expect(point?.payload.api_key_label).toBe("ingest-test");
+		// StorageProvider.upsert(id, vector, payload)
+		const payload = call[2] as Record<string, unknown>;
+		expect(payload.git_remote).toBe("github.com/test/repo");
+		expect(payload.scope).toBe("project");
+		expect(payload.api_key_label).toBe("ingest-test");
 	});
 
 	test("rejects invalid scope", async () => {

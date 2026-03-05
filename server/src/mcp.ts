@@ -21,7 +21,7 @@ import {
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import { StoreMemoryError, isDuplicate, storeMemory } from "./ingest.js";
-import { deletePoint, searchMemories } from "./qdrant.js";
+import { getStorageProvider } from "./storage.js";
 
 const log = getLogger(["husk", "mcp"]);
 
@@ -92,7 +92,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			try {
 				// When token-budgeted, fetch generously and trim client-side
 				const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
-				const results = await searchMemories(
+				const results = await getStorageProvider().search(
 					vector,
 					{ git_remote: args.project, scope: args.scope, user_id: apiKey.user_id },
 					fetchLimit,
@@ -243,9 +243,9 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			deleteMemory(args.id);
 
 			try {
-				await deletePoint(args.id);
+				await getStorageProvider().delete(args.id);
 			} catch (err) {
-				log.warn("Qdrant delete failed for {id}: {error}", {
+				log.warn("Vector delete failed for {id}: {error}", {
 					id: args.id,
 					error: err instanceof Error ? err.message : String(err),
 				});

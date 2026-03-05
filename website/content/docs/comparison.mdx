@@ -1,0 +1,144 @@
+---
+title: Comparison
+description: How HUSK compares to other AI memory tools, and the different approaches to persistent memory.
+---
+
+## Why HUSK
+
+Most AI memory tools are local-only — memories live on one machine and disappear when you switch laptops. HUSK is a self-hosted server that all your machines and teammates connect to.
+
+- **Cross-machine by default.** Run HUSK on a server or in Docker, point your AI tools at it from anywhere. No sync, no export/import — it's just always there.
+- **Team-ready.** Create users, generate API keys, invite a GitHub org. Not just "works for me on my laptop."
+- **Scoped retention.** Memories belong to a session, project, or global scope with independent TTL. Session context expires, architectural decisions stick around.
+- **Token-budgeted retrieval.** Ask for memories with a token limit — HUSK returns as many as fit. No context window blowup.
+- **Semantic duplicate detection.** Configurable similarity threshold so the same insight phrased differently doesn't pile up.
+- **MCP native.** Works with Claude Code, and any MCP-compatible tool out of the box.
+
+If you work on one machine and don't need multi-user, simpler tools like [claude-diary](https://github.com/rlancemartin/claude-diary) or claude-tandem might be enough. If you want a managed cloud service, [Supermemory](https://github.com/supermemoryai/supermemory) or [Khoj](https://github.com/khoj-ai/khoj) are worth a look.
+
+---
+
+## Developer memory tools
+
+{/*
+LLM PROMPT — How to add a new tool to this comparison table:
+
+1. Read the tool's README and documentation thoroughly.
+2. Add a new column header with the tool name linked to its GitHub repo.
+3. Fill in each row using the same format as existing columns:
+   - **Approach**: What memory architecture does it use? (vector, graph, file-based, hybrid, etc.)
+   - **Search**: How does it retrieve memories? (semantic, keyword, graph traversal, none)
+   - **Storage**: What's the backing store? (SQLite, Qdrant, Neo4j, files, cloud, etc.)
+   - **MCP support**: Does it expose MCP tools? ✅ or ❌ with detail if partial.
+   - **Scopes**: How are memories organized? (per-project, global, session, custom scopes)
+   - **Duplicate detection**: How does it handle near-duplicate memories?
+   - **TTL / retention**: Do memories expire? How is retention managed?
+   - **Multi-user**: Can multiple users share a single instance?
+   - **Cross-machine**: Can you access memories from different computers?
+   - **Web UI**: Is there a browser-based interface for managing memories?
+   - **Token budgeting**: Can you limit how many tokens of context are returned?
+   - **Language**: What is the primary implementation language?
+4. Use the <D t="detailed explanation">Short label</D> component for cells that benefit
+   from a tooltip with more context. Keep the visible text short and scannable.
+5. Use ✅/❌/⚠️ for boolean-ish rows, with <D> wrappers for nuance.
+6. Add the separator `|` to the header divider row (one more `---|`).
+*/}
+<div className="comparison-table">
+
+| | HUSK | [claude-mem](https://github.com/thedotmack/claude-mem) | [claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic) | [claude-total-memory](https://github.com/vbcherepanov/claude-total-memory) | [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | [mnemon](https://github.com/mnemon-dev/mnemon) | [claude-diary](https://github.com/rlancemartin/claude-diary) | [trvon/yams](https://github.com/trvon/yams) | [claude-tandem](https://github.com/jonny981/claude-tandem) | [knowledge-bank](https://github.com/gabrywu-public/knowledge-bank) | [lisa](https://github.com/TonyCasey/lisa) | [Supermemory](https://github.com/supermemoryai/supermemory) | [Khoj](https://github.com/khoj-ai/khoj) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Approach** | <D t="Qdrant for vector storage, Ollama for local embeddings">Vector (Qdrant)</D> | <D t="ChromaDB for vectors, local embedding">Vector (Chroma)</D> | <D t="Two-stage retrieval: bi-encoder semantic search then cross-encoder reranking. SQLite with FTS5 + sqlite-vec, ONNX embeddings">Vector + reranking (SQLite)</D> | <D t="4-tier hybrid: FTS5 keyword (BM25), ChromaDB semantic, fuzzy matching, knowledge graph expansion. 5 knowledge types: decision, solution, lesson, fact, convention">Hybrid 4-tier (Chroma + graph)</D> | <D t="Vector embeddings (MiniLM-L6-v2 via ONNX) + knowledge graph with typed relations (causes, fixes, contradicts) + BM25 keyword search">Hybrid (vector + graph + BM25)</D> | <D t="Temporal, entity, causal, and semantic graphs in SQLite">Four-graph (SQLite)</D> | File-based | <D t="SHA-256 content hashing, block-level dedup, more 'smart git' than memory">Content-addressed</D> | File-based | <D t="SQLite FTS5 full-text search">FTS (SQLite)</D> | <D t="Full Neo4j graph database with entity relationships">Knowledge graph (Neo4j)</D> | Vector | <D t="Vector search plus document-level indexing">Vector + document index</D> |
+| **Search** | Semantic | Semantic + keyword | <D t="FTS5 for exact matches, sqlite-vec for semantic search, BGE cross-encoder reranking">Semantic + keyword + reranking</D> | <D t="FTS5 BM25, ChromaDB semantic, SequenceMatcher fuzzy, knowledge graph expansion — results merged with decay scoring">Semantic + keyword + fuzzy + graph</D> | <D t="Vector semantic search + BM25 keyword + knowledge graph expansion with typed relations">Semantic + keyword + graph</D> | <D t="Traverse temporal, entity, causal, and semantic edges; optional vector layer">Graph traversal + optional vector</D> | ❌ | <D t="SQLite FTS5 with optional vector search layer">FTS5 + optional vector</D> | ❌ | Keyword (FTS) | Graph + semantic | Semantic | Semantic + keyword |
+| **Storage** | SQLite + Qdrant | SQLite + Chroma | <D t="SQLite with FTS5 and sqlite-vec, all-MiniLM-L6-v2 embeddings via ONNX">SQLite</D> | <D t="SQLite with FTS5 for structured data, ChromaDB with all-MiniLM-L6-v2 for vectors">SQLite + Chroma</D> | <D t="SQLite-vec for vectors, optional Cloudflare Workers + Vectorize for cloud sync">SQLite (+ optional Cloudflare)</D> | SQLite | Markdown files | SQLite + blob store | Plain files | SQLite | Neo4j | Cloud | SQLite + cloud |
+| **MCP support** | ✅ | ✅ | <D t="Exposes search, timeline, decisions, changes, and how_it_works tools">✅</D> | <D t="20 MCP tools: recall, save, search, timeline, stats, graph relations, self-improvement, and more">✅</D> | <D t="MCP server + REST API, works with Claude Desktop, Claude Code, LangGraph, CrewAI, AutoGen">✅</D> | <D t="Uses its own CLI protocol, not MCP">❌</D> | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| **Scopes** | <D t="Memories scoped to session, project, or global with independent TTL defaults per scope">Session / project / global</D> | Per-project | <D t="Auto-classifies as project-local or global based on tags like best-practice, security, architecture">Project / global (auto)</D> | <D t="5 knowledge types: decision, solution, lesson, fact, convention. Tagged and categorized automatically">Knowledge types (5)</D> | <D t="Automatic agent-ID tagging via X-Agent-ID header for per-agent memory scoping">Per-agent (auto)</D> | Named stores | Per-project | N/A | <D t="P1 (core), P2 (important), P3 (ephemeral) priority tiers">Priority tiers (P1-P3)</D> | <D t="Memories classified by type and scope automatically">Type + scope classification</D> | Per-project | Container tags | Per-agent KB |
+| **Duplicate detection** | <D t="Cosine similarity threshold, configurable per scope to control how aggressively near-duplicates are merged">Semantic (configurable)</D> | <D t="LLM compresses and merges related memories automatically">AI compression</D> | <D t="Detects contradictory observations, memories can be superseded">Conflict detection + supersede</D> | <D t="Jaccard similarity (0.85) + fuzzy matching (0.90) with version history and supersession chains">Jaccard + fuzzy + versioning</D> | <D t="Semantic dedup with conversation_id bypass for incremental saves, autonomous consolidation">Semantic + consolidation</D> | <D t="Deterministic dedup with conflict detection between contradicting memories">Built-in + conflict detection</D> | <D t="LLM reflects on existing memories before adding new ones">LLM reflection</D> | SHA-256 content hash | File compaction | ❌ | Entity resolution | <D t="Detects and resolves contradictions between memories automatically">Auto + contradiction detection</D> | ❌ |
+| **TTL / retention** | <D t="Each scope has default TTL, overridable per memory. Expired memories are garbage collected">Per-scope, configurable</D> | ❌ | <D t="Observation lifecycle with supersede/archive, importance scoring with time decay and voting">Importance decay + voting</D> | <D t="Retention zones: Active → Archived (180d) → Purged (365d). Decay scoring with 90-day half-life and recall boost">Retention zones (180d / 365d)</D> | ❌ | <D t="Memories have importance scores that decay over time; GC removes low-importance entries">Importance decay + GC</D> | ❌ | ❌ | <D t="P3 ephemeral tier auto-expires, P1/P2 persist">Ephemeral tier auto-expires</D> | ❌ | Temporal tracking | Auto-expiry | ❌ |
+| **Multi-user** | <D t="Create users, generate API keys, invite a GitHub org to join. Admin UI for user management">✅</D> | ❌ | ❌ | ❌ | <D t="Team collaboration via optional Cloudflare backend">⚠️</D> | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | <D t="Cloud-hosted, multi-tenant">✅</D> | ✅ |
+| **Cross-machine** | <D t="Self-hosted server — all your machines connect to one instance. Switch laptops, use a desktop, memories are always there">✅</D> | <D t="Runs locally per machine, memories don't sync">❌</D> | <D t="Local plugin, memories stay on one machine">❌</D> | <D t="Local-only, all data in ~/.claude-memory">❌</D> | <D t="Local-first with optional Cloudflare cloud sync for cross-machine access">⚠️</D> | <D t="Local binary, memories stay on one machine">❌</D> | <D t="Local markdown files, no sync">❌</D> | <D t="Local binary, no remote access">❌</D> | <D t="Local files, no sync">❌</D> | <D t="Local npm server, no remote access">❌</D> | <D t="Possible if Neo4j is hosted on a server, but not the default setup">⚠️</D> | <D t="Cloud-hosted, inherently cross-machine">✅</D> | <D t="Has cloud sync and self-hosted server mode">✅</D> |
+| **Web UI** | <D t="Admin dashboard for users, settings, and memory management">✅</D> | <D t="Memory viewer for browsing stored memories">✅</D> | <D t="Dashboard at localhost:37777 for browsing and managing memories">✅</D> | <D t="Flask dashboard at localhost:37737 — stats, health score, knowledge graph visualization, session browser, self-improvement tab">✅</D> | <D t="8-tab dashboard at localhost:8000 — search, browse, documents, analytics, quality scoring, D3.js knowledge graph visualization">✅</D> | ❌ | ❌ | ❌ | ❌ | <D t="Dashboard for browsing and managing knowledge entries">✅</D> | ❌ | ❌ | ✅ |
+| **Token budgeting** | <D t="Pass max_tokens to retrieval — server returns as many memories as fit within the budget">✅</D> | <D t="Progressively discloses more context as conversation develops">Progressive disclosure</D> | <D t="Max 100 observations, 25 full-detail, 10 sessions per query — configurable limits">Configurable limits</D> | <D t="3-level progressive disclosure (compact ~50 tokens, summary 150 chars, full) with per-result token estimation">Progressive disclosure</D> | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Language** | TypeScript (Bun) | TypeScript (Bun) | Go | Python | Python | Go | Shell | C++ | Shell | TypeScript | TypeScript | Cloud service | Python |
+
+</div>
+
+---
+
+## Approaches to AI memory
+
+Not all memory systems work the same way. Understanding the approaches helps explain why different tools make different trade-offs.
+
+### Vector / semantic search
+
+Store memories as text, embed them into vectors, find similar ones by meaning. This is what HUSK does today with Qdrant and Ollama.
+
+**Strengths:** Natural language queries, fuzzy matching, finds relevant context even when wording differs.
+**Weaknesses:** No explicit relationships between memories. "Find me things *about* auth" works great, "what *caused* the auth rewrite?" doesn't.
+
+### Knowledge graphs
+
+Model memories as nodes with typed edges between them: decisions, consequences, contradictions, temporal sequences.
+
+**Strengths:** Relationship queries, causal chains, "what changed since last week?", contradiction detection.
+**Weaknesses:** More complex infrastructure (Neo4j, or graph-in-SQLite), requires entity extraction to build the graph.
+
+### File-based / CLAUDE.md injection
+
+Write learnings to markdown files. The AI reads them at session start. No search, no database.
+
+**Strengths:** Zero dependencies, dead simple, works with any AI tool that reads project files.
+**Weaknesses:** Doesn't scale. No search, no scoping, no dedup. You're limited to what fits in a flat file.
+
+### Content-addressed storage
+
+Hash and deduplicate file content at the block level, with search layered on top. More "smart git" than memory system.
+
+**Strengths:** Efficient storage of actual files, snapshot diffs, no duplicate content.
+**Weaknesses:** Optimized for files and code, not for discrete memories or observations.
+
+### Hybrid approaches
+
+Combine vector search with knowledge graphs and/or full-text search. Use the right retrieval method for the query type.
+
+HUSK currently uses vector search. Adding a graph layer on top (not replacing vectors) would enable relationship-aware retrieval alongside semantic similarity. For example: vector search finds "we switched to session cookies" and a graph edge connects it to "XSS vulnerability in the JWT flow" as the cause. This is on the [roadmap](#whats-next-for-husk).
+
+---
+
+## Agent and chatbot memory platforms
+
+These tools target a different use case: giving AI agents and chatbots memory about their *end users*. "Remember that this customer prefers dark roast coffee" rather than "remember that this codebase uses the repository pattern."
+
+They're worth knowing about, but solve a different problem than HUSK.
+
+| Platform | What it's for | Open source | Approach |
+|---|---|---|---|
+| [Mem0](https://mem0.ai/) | Memory API for AI apps. User/session/agent scopes for personalizing chatbots and agents. 48.5k GitHub stars, $24M Series A. | Yes | Vector + graph |
+| [Zep](https://www.getzep.com/) | Enterprise context platform. Temporal knowledge graphs that track how customer preferences evolve. Graphiti engine (23.2k stars) is open source. | Partial | Temporal knowledge graph |
+| [Letta](https://www.letta.com/) | Stateful agent platform (formerly MemGPT). Agents self-manage their own memory using an OS-inspired hierarchy: core memory (RAM) vs archival memory (disk). 20.3k stars. | Yes | OS-style memory tiers |
+| [Cognee](https://www.cognee.ai/) | Knowledge engine with ECL pipeline (Extract, Cognify, Load). Self-improving memory that prunes stale nodes and reweights edges. 12.9k stars. | Yes | Knowledge graph + vector |
+
+---
+
+## Claude's native memory
+
+Claude has its own memory systems that are separate from HUSK. Understanding how they work helps explain where HUSK fits in.
+
+### Claude.ai memory
+
+The consumer product (claude.ai) remembers preferences and context across conversations. Processed in daily synthesis cycles. No API, UI-only management. Not relevant for developer tooling.
+
+### Claude Code auto memory
+
+Claude Code writes notes to `~/.claude/projects/*/memory/MEMORY.md` as it works. Plain markdown, machine-local, no sync, no search. HUSK fills the gaps: cross-machine sync, semantic search, scoped retention, and multi-user support.
+
+### Claude Memory API
+
+The most interesting integration point. The [Memory API](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/memory-tool) (`memory_20250818`) is a client-side tool where Claude emits file operations (`create`, `view`, `str_replace`) and *your application* handles the storage. Anthropic stores nothing.
+
+HUSK could act as the storage backend for this tool, adding vector indexing, semantic dedup, scoping, and TTL on top of Claude's native memory operations. This is on the roadmap.
+
+---
+
+## What's next for HUSK
+
+See the [roadmap](https://github.com/Saturate/HUSK/blob/main/ROADMAP.md) for planned features, including knowledge graph integration, Claude Memory API bridging, and hybrid retrieval.

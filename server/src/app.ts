@@ -10,10 +10,10 @@ import { getDb } from "./db.js";
 import { ingest } from "./ingest.js";
 import { mountMcp } from "./mcp.js";
 import { isGitHubOAuthEnabled, oauth } from "./oauth.js";
-import { getQdrantClient } from "./qdrant.js";
 import { rateLimiter } from "./rate-limit.js";
 import { sessions } from "./sessions.js";
 import { setup, setupGuard } from "./setup.js";
+import { getStorageProvider } from "./storage.js";
 
 const log = getLogger(["husk", "server"]);
 
@@ -39,7 +39,7 @@ app.use(
 app.use("*", bodyLimit({ maxSize: 1024 * 1024 }));
 app.use("*", setupGuard());
 
-app.get("/health", (c) => {
+app.get("/health", async (c) => {
 	const checks: Record<string, string> = { server: "ok" };
 
 	try {
@@ -50,10 +50,10 @@ app.get("/health", (c) => {
 	}
 
 	try {
-		getQdrantClient();
-		checks.qdrant = "ok";
+		const storage = getStorageProvider();
+		checks.vector_storage = (await storage.healthy()) ? "ok" : "error";
 	} catch {
-		checks.qdrant = "not configured";
+		checks.vector_storage = "not configured";
 	}
 
 	const overall = checks.database === "ok" ? "ok" : "degraded";

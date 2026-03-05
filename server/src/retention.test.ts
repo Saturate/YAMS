@@ -13,15 +13,16 @@ import {
 import type { EmbeddingProvider } from "./embeddings.js";
 import { setProvider } from "./embeddings.js";
 import { resolveExpiresAt, storeMemory } from "./ingest.js";
-import { setQdrantClient } from "./qdrant.js";
 import { sweepExpiredMemories } from "./retention.js";
+import type { StorageProvider, VectorSearchResult } from "./storage.js";
+import { setStorageProvider } from "./storage.js";
 import { createTestApp } from "./test-helpers.js";
 
 const mockVector = new Array(768).fill(0.1) as number[];
 const mockEmbed = mock(() => Promise.resolve(mockVector));
-const mockUpsert = mock(() => Promise.resolve({}));
-const mockDelete = mock(() => Promise.resolve({}));
-const mockSearch = mock(() => Promise.resolve([] as unknown[]));
+const mockUpsert = mock(() => Promise.resolve());
+const mockDelete = mock(() => Promise.resolve());
+const mockSearch = mock(() => Promise.resolve([] as VectorSearchResult[]));
 
 const mockProvider: EmbeddingProvider = {
 	name: "mock",
@@ -29,17 +30,19 @@ const mockProvider: EmbeddingProvider = {
 	embed: mockEmbed,
 };
 
-const mockQdrantClient = {
-	getCollections: () => Promise.resolve({ collections: [{ name: "husk_memories" }] }),
+const mockStorage: StorageProvider = {
+	name: "mock",
+	init: () => Promise.resolve(),
 	upsert: mockUpsert,
 	search: mockSearch,
 	delete: mockDelete,
-} as unknown as import("@qdrant/js-client-rest").QdrantClient;
+	healthy: () => Promise.resolve(true),
+};
 
 function setupTestDb() {
 	createTestApp();
 	setProvider(mockProvider);
-	setQdrantClient(mockQdrantClient);
+	setStorageProvider(mockStorage);
 }
 
 function createTestUser(): { userId: string; apiKeyId: string } {
@@ -267,7 +270,7 @@ describe("sweepExpiredMemories", () => {
 		mockDelete.mockClear();
 	});
 
-	test("deletes expired memories from SQLite and Qdrant", async () => {
+	test("deletes expired memories from SQLite and vector storage", async () => {
 		const { apiKeyId } = createTestUser();
 		const id1 = crypto.randomUUID();
 		const id2 = crypto.randomUUID();
@@ -306,7 +309,7 @@ describe("storeMemory with TTL", () => {
 		mockEmbed.mockClear();
 		mockUpsert.mockClear();
 		mockSearch.mockReset();
-		mockSearch.mockImplementation(() => Promise.resolve([] as unknown[]));
+		mockSearch.mockImplementation(() => Promise.resolve([] as VectorSearchResult[]));
 	});
 
 	test("stores memory with scope-default expiry", async () => {
@@ -356,7 +359,7 @@ describe("storeMemory with TTL", () => {
 		}
 	});
 
-	test("passes expires_at to Qdrant payload", async () => {
+	test("passes expires_at to storage payload", async () => {
 		const { userId, apiKeyId } = createTestUser();
 		await storeMemory({
 			summary: "test memory",
@@ -369,7 +372,8 @@ describe("storeMemory with TTL", () => {
 
 		expect(mockUpsert).toHaveBeenCalledTimes(1);
 		const call = mockUpsert.mock.calls[0] as unknown[];
-		const arg = call[1] as { points: Array<{ payload: Record<string, unknown> }> };
-		expect(arg.points[0]?.payload.expires_at).not.toBeNull();
+		// StorageProvider.upsert(id, vector, payload)
+		const payload = call[2] as Record<string, unknown>;
+		expect(payload.expires_at).not.toBeNull();
 	});
 });

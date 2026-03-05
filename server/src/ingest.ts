@@ -3,7 +3,7 @@ import { bearerKeyMiddleware } from "./auth.js";
 import { createMemory, getConfigWithEnv, getMemory, updateMemorySummary } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import type { AppEnv } from "./env.js";
-import { searchMemories, upsertMemory } from "./qdrant.js";
+import { getStorageProvider } from "./storage.js";
 
 const VALID_SCOPES = ["session", "project", "global"] as const;
 type Scope = (typeof VALID_SCOPES)[number];
@@ -135,7 +135,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 		updateMemorySummary(params.replace, params.summary);
 
 		try {
-			await upsertMemory(params.replace, vector, {
+			await getStorageProvider().upsert(params.replace, vector, {
 				memory_id: params.replace,
 				user_id: params.userId,
 				git_remote: gitRemote,
@@ -163,10 +163,10 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 	if (!params.force) {
 		const threshold = getDedupThreshold();
 		try {
-			const similar = await searchMemories(vector, { user_id: params.userId }, 1);
+			const similar = await getStorageProvider().search(vector, { user_id: params.userId }, 1);
 			const top = similar[0];
 			if (top && top.score >= threshold) {
-				const existingId = String(top.id);
+				const existingId = top.id;
 				const existingMemory = getMemory(existingId);
 				return {
 					duplicate: true,
@@ -176,7 +176,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 				};
 			}
 		} catch {
-			// Qdrant unavailable — skip dedup, store anyway
+			// Vector storage unavailable — skip dedup, store anyway
 		}
 	}
 
@@ -194,7 +194,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 	});
 
 	try {
-		await upsertMemory(id, vector, {
+		await getStorageProvider().upsert(id, vector, {
 			memory_id: id,
 			user_id: params.userId,
 			git_remote: gitRemote,

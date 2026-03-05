@@ -2,17 +2,17 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { createMemory } from "./db.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { setProvider } from "./embeddings.js";
-import { setQdrantClient } from "./qdrant.js";
+import type { StorageProvider, VectorSearchResult } from "./storage.js";
+import { setStorageProvider } from "./storage.js";
 import { createTestApp, getToken, setupAdmin } from "./test-helpers.js";
 
 const mockVector = new Array(768).fill(0.1) as number[];
 const mockEmbed = mock(() => Promise.resolve(mockVector));
-const mockDelete = mock(() => Promise.resolve({}));
+const mockDelete = mock(() => Promise.resolve());
 const mockSearch = mock(() =>
 	Promise.resolve([
 		{
 			id: "mem-1",
-			version: 1,
 			score: 0.9,
 			payload: {
 				memory_id: "mem-1",
@@ -22,7 +22,7 @@ const mockSearch = mock(() =>
 				created_at: "2026-01-01T00:00:00.000Z",
 			},
 		},
-	]),
+	] as VectorSearchResult[]),
 );
 
 const mockProvider: EmbeddingProvider = {
@@ -31,12 +31,14 @@ const mockProvider: EmbeddingProvider = {
 	embed: mockEmbed,
 };
 
-const mockQdrantClient = {
-	getCollections: () => Promise.resolve({ collections: [{ name: "husk_memories" }] }),
-	upsert: mock(() => Promise.resolve({})),
+const mockStorage: StorageProvider = {
+	name: "mock",
+	init: () => Promise.resolve(),
+	upsert: mock(() => Promise.resolve()),
 	search: mockSearch,
 	delete: mockDelete,
-} as unknown as import("@qdrant/js-client-rest").QdrantClient;
+	healthy: () => Promise.resolve(true),
+};
 
 async function getAdminToken(app: ReturnType<typeof createTestApp>) {
 	await setupAdmin(app);
@@ -56,7 +58,7 @@ function seedMemory(id: string, apiKeyId: string, opts?: { gitRemote?: string; s
 describe("admin API", () => {
 	beforeEach(() => {
 		setProvider(mockProvider);
-		setQdrantClient(mockQdrantClient);
+		setStorageProvider(mockStorage);
 		mockEmbed.mockClear();
 		mockSearch.mockClear();
 		mockDelete.mockClear();
@@ -64,7 +66,7 @@ describe("admin API", () => {
 
 	afterEach(() => {
 		setProvider(mockProvider);
-		setQdrantClient(null);
+		setStorageProvider(null);
 	});
 
 	test("rejects unauthenticated requests", async () => {
