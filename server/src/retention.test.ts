@@ -309,7 +309,7 @@ describe("storeMemory with TTL", () => {
 		mockEmbed.mockClear();
 		mockUpsert.mockClear();
 		mockSearch.mockReset();
-		mockSearch.mockImplementation(() => Promise.resolve([] as unknown[]));
+		mockSearch.mockImplementation(() => Promise.resolve([] as VectorSearchResult[]));
 	});
 
 	test("stores memory with scope-default expiry", async () => {
