@@ -32,7 +32,9 @@ export function generateDockerCompose(
 	}
 
 	if (services.ollama) {
-		const model = services.ollama.model ?? "nomic-embed-text";
+		const raw = services.ollama.model ?? "nomic-embed-text";
+		// Sanitize: ollama model names are alphanumeric with colons, dashes, dots, underscores, slashes
+		const model = raw.replace(/[^a-zA-Z0-9:._\-/]/g, "");
 		lines.push(
 			"  ollama:",
 			"    image: ollama/ollama:latest",

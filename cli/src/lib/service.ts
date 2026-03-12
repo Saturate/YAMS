@@ -7,7 +7,15 @@ import { paths } from "./paths.js";
 
 const LABEL = "io.husk.server";
 
-function launchdPlist(bunPath: string, configPath: string): string {
+function escapeXml(s: string): string {
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
+}
+
+export function launchdPlist(bunPath: string, configPath: string): string {
 	const serverDir = `${paths.server}/server`;
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -17,16 +25,16 @@ function launchdPlist(bunPath: string, configPath: string): string {
 	<string>${LABEL}</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>${bunPath}</string>
+		<string>${escapeXml(bunPath)}</string>
 		<string>run</string>
 		<string>src/index.ts</string>
 	</array>
 	<key>WorkingDirectory</key>
-	<string>${serverDir}</string>
+	<string>${escapeXml(serverDir)}</string>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>HUSK_CONFIG</key>
-		<string>${configPath}</string>
+		<string>${escapeXml(configPath)}</string>
 	</dict>
 	<key>RunAtLoad</key>
 	<true/>
@@ -40,7 +48,7 @@ function launchdPlist(bunPath: string, configPath: string): string {
 </plist>`;
 }
 
-function systemdUnit(bunPath: string, configPath: string): string {
+export function systemdUnit(bunPath: string, configPath: string): string {
 	const serverDir = `${paths.server}/server`;
 	return `[Unit]
 Description=HUSK Memory Server

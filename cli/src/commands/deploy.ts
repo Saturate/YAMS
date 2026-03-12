@@ -128,7 +128,7 @@ function tryClipboard(text: string): boolean {
 	return false;
 }
 
-interface DeployConfig {
+export interface DeployConfig {
 	domain: string;
 	provider: string;
 	proxy: string;
@@ -136,7 +136,7 @@ interface DeployConfig {
 	embeddings: string;
 }
 
-function generatePrompt(config: DeployConfig): string {
+export function generatePrompt(config: DeployConfig): string {
 	const services = [];
 	if (config.storage === "qdrant") services.push("Qdrant (vector database)");
 	if (config.embeddings === "ollama") services.push("Ollama (embedding model)");
@@ -155,12 +155,12 @@ function generatePrompt(config: DeployConfig): string {
 		other: "a server (details TBD)",
 	};
 
-	return `Help me deploy HUSK (a self-hosted memory server for AI coding assistants) on ${providerNames[config.provider]}.
+	return `Help me deploy HUSK (a self-hosted memory server for AI coding assistants) on ${providerNames[config.provider] ?? config.provider}.
 
 ## My setup
 
 - **Domain**: ${config.domain}
-- **Reverse proxy**: ${proxyNames[config.proxy]}
+- **Reverse proxy**: ${proxyNames[config.proxy] ?? config.proxy}
 - **Vector storage**: ${config.storage}
 - **Embeddings**: ${config.embeddings}${services.length > 0 ? `\n- **Additional services**: ${services.join(", ")}` : ""}
 
@@ -186,7 +186,7 @@ Walk me through these steps, asking me questions as needed:
    - [ ] Start the stack and verify health: \`curl http://localhost:3000/health\`
 
 4. **HTTPS / reverse proxy**${config.proxy !== "none" ? `
-   - [ ] Install and configure ${proxyNames[config.proxy]}
+   - [ ] Install and configure ${proxyNames[config.proxy] ?? config.proxy}
    - [ ] Set up TLS for \`${config.domain}\` → \`localhost:3000\`
    - [ ] Verify HTTPS works: \`curl https://${config.domain}/health\`` : `
    - [ ] Set up TLS termination

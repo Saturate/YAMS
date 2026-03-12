@@ -32,14 +32,15 @@ function readVersionInfo(): VersionInfo | null {
 	}
 }
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function progressBar(ratio: number, width = 20): string {
-	const filled = Math.round(ratio * width);
+export function progressBar(ratio: number, width = 20): string {
+	const clamped = Math.max(0, Math.min(1, ratio || 0));
+	const filled = Math.round(clamped * width);
 	return "\u2588".repeat(filled) + "\u2591".repeat(width - filled);
 }
 
