@@ -11,7 +11,8 @@
 	},
 	"scripts": {
 		"build": "tsup",
-		"dev": "tsup --watch"
+		"dev": "tsup --watch",
+		"test": "bun test"
 	},
 	"dependencies": {
 		"@clack/prompts": "^0.10",

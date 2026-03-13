@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { stringify, parse } from "smol-toml";
 import { paths } from "./paths.js";
 
@@ -80,7 +80,7 @@ export function readConfig(configPath?: string): HuskConfig | null {
 export function resolveConfigPath(): string {
 	// Check CWD first, then default location
 	const cwdConfig = "husk.toml";
-	if (existsSync(cwdConfig)) return cwdConfig;
+	if (existsSync(cwdConfig)) return resolve(cwdConfig);
 	return paths.config;
 }
 
