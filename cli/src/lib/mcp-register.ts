@@ -31,16 +31,24 @@ export function detectClients(): { claude: boolean; cursor: boolean } {
 	};
 }
 
+function stripTrailingSlash(url: string): string {
+	return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
 export function registerClaude(serverUrl: string, apiKey: string): boolean {
 	try {
+		const base = stripTrailingSlash(serverUrl);
 		const mcpJson = JSON.stringify({
 			type: "http",
-			url: `${serverUrl}/mcp`,
+			url: `${base}/mcp`,
 			headers: { Authorization: `Bearer ${apiKey}` },
 		});
 
+		// Escape single quotes for safe shell interpolation
+		const escaped = mcpJson.replace(/'/g, "'\\''");
+
 		execSync(
-			`claude mcp add-json husk '${mcpJson}' --scope user`,
+			`claude mcp add-json husk '${escaped}' --scope user`,
 			{ stdio: "pipe" },
 		);
 		return true;
@@ -51,6 +59,7 @@ export function registerClaude(serverUrl: string, apiKey: string): boolean {
 
 export function registerCursor(serverUrl: string, apiKey: string): boolean {
 	try {
+		const base = stripTrailingSlash(serverUrl);
 		const cursorDir = join(homedir(), ".cursor");
 		const mcpPath = join(cursorDir, "mcp.json");
 
@@ -59,7 +68,7 @@ export function registerCursor(serverUrl: string, apiKey: string): boolean {
 		if (existsSync(mcpPath)) {
 			try {
 				config = JSON.parse(readFileSync(mcpPath, "utf-8"));
-				if (!config.mcpServers) {
+				if (!config.mcpServers || typeof config.mcpServers !== "object") {
 					config.mcpServers = {};
 				}
 			} catch {
@@ -68,7 +77,7 @@ export function registerCursor(serverUrl: string, apiKey: string): boolean {
 		}
 
 		config.mcpServers.husk = {
-			url: `${serverUrl}/mcp`,
+			url: `${base}/mcp`,
 			headers: { Authorization: `Bearer ${apiKey}` },
 		};
 
@@ -81,12 +90,13 @@ export function registerCursor(serverUrl: string, apiKey: string): boolean {
 }
 
 export function getManualConfig(serverUrl: string, apiKey: string): string {
+	const base = stripTrailingSlash(serverUrl);
 	return JSON.stringify(
 		{
 			mcpServers: {
 				husk: {
 					type: "http",
-					url: `${serverUrl}/mcp`,
+					url: `${base}/mcp`,
 					headers: { Authorization: `Bearer ${apiKey}` },
 				},
 			},
