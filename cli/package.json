@@ -9,10 +9,25 @@
 	"engines": {
 		"node": ">=18"
 	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Saturate/HUSK.git",
+		"directory": "cli"
+	},
+	"homepage": "https://github.com/Saturate/HUSK/tree/main/cli",
+	"bugs": {
+		"url": "https://github.com/Saturate/HUSK/issues"
+	},
+	"keywords": ["ai", "memory", "coding-assistant", "mcp", "cli"],
 	"scripts": {
 		"build": "tsup",
 		"dev": "tsup --watch",
-		"test": "bun test"
+		"test": "bun test",
+		"prepublishOnly": "tsup",
+		"changelog": "git-cliff --include-path 'cli/**' -o cli/CHANGELOG.md"
 	},
 	"dependencies": {
 		"@clack/prompts": "^0.10",

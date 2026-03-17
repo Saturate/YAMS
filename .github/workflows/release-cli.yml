@@ -1,0 +1,65 @@
+name: Release CLI
+
+on:
+  push:
+    tags:
+      - "cli/v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install git-cliff
+        uses: kenji-miyake/setup-git-cliff@v2
+
+      - name: Install dependencies
+        working-directory: cli
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        working-directory: cli
+        run: bun run build
+
+      - name: Test
+        working-directory: cli
+        run: bun test
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#cli/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          git-cliff --include-path 'cli/**' --config cli/cliff.toml --latest --strip header > RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "@huskai/cli v${{ steps.version.outputs.version }}"
+          body_path: RELEASE_NOTES.md
+
+      - name: Publish to npm
+        working-directory: cli
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,82 @@
+name: Prepare CLI Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version bump (auto = git-cliff decides, or exact like 1.2.3)"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install git-cliff
+        uses: kenji-miyake/setup-git-cliff@v2
+
+      - name: Calculate version
+        id: version
+        run: |
+          if [ "${{ inputs.version }}" = "auto" ]; then
+            # git-cliff bumped-version returns the tag including prefix
+            FULL_VERSION=$(git-cliff --include-path 'cli/**' --bumped-version --config cli/cliff.toml)
+            # Strip the cli/v prefix
+            VERSION="${FULL_VERSION#cli/v}"
+          else
+            CURRENT=$(node -p "require('./cli/package.json').version")
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            case "${{ inputs.version }}" in
+              major) VERSION="$((MAJOR + 1)).0.0" ;;
+              minor) VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+              patch) VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+            esac
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Calculated version: $VERSION"
+
+      - name: Generate changelog
+        run: git-cliff --include-path 'cli/**' --config cli/cliff.toml --tag "cli/v${{ steps.version.outputs.version }}" -o cli/CHANGELOG.md
+
+      - name: Bump package.json version
+        working-directory: cli
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+
+      - name: Commit, tag, and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cli/package.json cli/CHANGELOG.md
+          git commit -m "chore(cli): release v${{ steps.version.outputs.version }}"
+          git tag "cli/v${{ steps.version.outputs.version }}"
+          git push origin HEAD --follow-tags
