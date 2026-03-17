@@ -25,6 +25,11 @@ const TOML_TO_ENV: Record<string, string> = {
 	"compression.url": "HUSK_COMPRESSION_URL",
 	"compression.mode": "HUSK_COMPRESSION_MODE",
 
+	"graph.backend": "HUSK_GRAPH",
+	"graph.url": "HUSK_GRAPH_URL",
+	"graph.user": "HUSK_GRAPH_USER",
+	"graph.password": "HUSK_GRAPH_PASSWORD",
+
 	"auth.github_client_id": "GITHUB_CLIENT_ID",
 	"auth.github_client_secret": "GITHUB_CLIENT_SECRET",
 	"auth.oauth_allowed_orgs": "OAUTH_ALLOWED_ORGS",

@@ -1,6 +1,12 @@
 import { Hono } from "hono";
 import { bearerKeyMiddleware } from "./auth.js";
-import { createMemory, getConfigWithEnv, getMemory, updateMemorySummary } from "./db.js";
+import {
+	createMemory,
+	getConfigWithEnv,
+	getMemory,
+	getMemoryForUser,
+	updateMemorySummary,
+} from "./db.js";
 import { getProvider } from "./embeddings.js";
 import type { AppEnv } from "./env.js";
 import { getStorageProvider } from "./storage.js";
@@ -127,7 +133,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 
 	// Replace mode: overwrite an existing memory
 	if (params.replace) {
-		const existing = getMemory(params.replace);
+		const existing = getMemoryForUser(params.replace, params.userId);
 		if (!existing) {
 			throw new StoreMemoryError("Memory to replace not found.", "validation");
 		}

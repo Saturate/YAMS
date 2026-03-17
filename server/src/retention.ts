@@ -1,5 +1,6 @@
 import { getLogger } from "@logtape/logtape";
 import { deleteMemoriesBatch, getExpiredMemoryIds } from "./db.js";
+import { getGraphProviderOrNull } from "./graph.js";
 import { getStorageProvider } from "./storage.js";
 
 const log = getLogger(["husk", "retention"]);
@@ -38,6 +39,8 @@ export async function sweepExpiredMemories(): Promise<number> {
 
 	deleteMemoriesBatch(ids);
 
+	const graphProvider = getGraphProviderOrNull();
+
 	for (const id of ids) {
 		try {
 			await getStorageProvider().delete(id);
@@ -46,6 +49,17 @@ export async function sweepExpiredMemories(): Promise<number> {
 				id,
 				error: err instanceof Error ? err.message : String(err),
 			});
+		}
+
+		if (graphProvider) {
+			try {
+				await graphProvider.removeEdgesForMemory(id);
+			} catch (err) {
+				log.warn("Graph edge cleanup failed for expired memory {id}: {error}", {
+					id,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
 		}
 	}
 

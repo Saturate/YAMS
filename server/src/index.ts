@@ -4,6 +4,7 @@ import { initCompressionListener, runCompressionCycle } from "./compression.js";
 import { loadConfig } from "./config.js";
 import { getUserCount, initDb } from "./db.js";
 import { checkOllamaModel, getProvider } from "./embeddings.js";
+import { initGraph } from "./graph.js";
 import { initLogging } from "./logger.js";
 import { initRetentionSweeper } from "./retention.js";
 import { initStorage } from "./storage.js";
@@ -37,6 +38,12 @@ initStorage(getProvider().dimensions)
 			error: err instanceof Error ? err.message : String(err),
 		}),
 	);
+
+initGraph().catch((err: unknown) =>
+	log.warn("Graph layer not available: {error}", {
+		error: err instanceof Error ? err.message : String(err),
+	}),
+);
 
 if (getProvider().name === "ollama") {
 	checkOllamaModel();

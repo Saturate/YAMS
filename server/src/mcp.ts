@@ -7,19 +7,14 @@ import type { ValidatedApiKey } from "./auth.js";
 import { validateBearerKey } from "./auth.js";
 import { parseSummary } from "./compression.js";
 import {
-	countMemories,
+	UserScope,
 	countObservations,
-	deleteMemory,
-	getMemoryForUser,
-	getObservationForUser,
 	getRecentSessionSummaries,
 	getSessionFilesModified,
-	getSessionForUser,
-	listDistinctGitRemotes,
-	listMemories,
 	listObservations,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
+import { EDGE_TYPES, getGraphProviderOrNull } from "./graph.js";
 import { StoreMemoryError, isDuplicate, storeMemory } from "./ingest.js";
 import { getStorageProvider } from "./storage.js";
 
@@ -47,6 +42,7 @@ function fitTokenBudget<T>(memories: T[], maxTokens: number): T[] {
 }
 
 function createMcpServer(apiKey: ValidatedApiKey): McpServer {
+	const db = new UserScope(apiKey.user_id);
 	const server = new McpServer({
 		name: "husk",
 		version: "0.1.0",
@@ -232,15 +228,12 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			},
 		},
 		async (args) => {
-			const memory = getMemoryForUser(args.id, apiKey.user_id);
-			if (!memory) {
+			if (!db.deleteMemory(args.id)) {
 				return {
 					isError: true,
 					content: [{ type: "text" as const, text: "Memory not found." }],
 				};
 			}
-
-			deleteMemory(args.id);
 
 			try {
 				await getStorageProvider().delete(args.id);
@@ -249,6 +242,18 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					id: args.id,
 					error: err instanceof Error ? err.message : String(err),
 				});
+			}
+
+			const graphProvider = getGraphProviderOrNull();
+			if (graphProvider) {
+				try {
+					await graphProvider.removeEdgesForMemory(args.id);
+				} catch (err) {
+					log.warn("Graph edge cleanup failed for {id}: {error}", {
+						id: args.id,
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
 			}
 
 			return {
@@ -263,7 +268,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			description: "List known projects (distinct git remotes). Cost: DB read only, no LLM.",
 		},
 		() => {
-			const projects = listDistinctGitRemotes(apiKey.user_id);
+			const projects = db.listGitRemotes();
 			return {
 				content: [
 					{
@@ -290,17 +295,15 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 		(args) => {
 			const limit = args.limit ?? 50;
 			const offset = args.offset ?? 0;
-			const memories = listMemories({
+			const memories = db.listMemories({
 				gitRemote: args.project,
 				scope: args.scope,
 				limit,
 				offset,
-				userId: apiKey.user_id,
 			});
-			const total = countMemories({
+			const total = db.countMemories({
 				gitRemote: args.project,
 				scope: args.scope,
-				userId: apiKey.user_id,
 			});
 
 			return {
@@ -386,7 +389,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			},
 		},
 		(args) => {
-			const session = getSessionForUser(args.session_id, apiKey.user_id);
+			const session = db.getSession(args.session_id);
 			if (!session) {
 				return {
 					content: [
@@ -478,7 +481,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			},
 		},
 		(args) => {
-			const observation = getObservationForUser(args.id, apiKey.user_id);
+			const observation = db.getObservation(args.id);
 			if (!observation) {
 				return {
 					content: [{ type: "text" as const, text: "Observation not found." }],
@@ -525,6 +528,215 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			};
 		},
 	);
+
+	// --- Graph tools (only when graph layer is active) ---
+	const graph = getGraphProviderOrNull();
+	if (graph) {
+		server.registerTool(
+			"link",
+			{
+				description:
+					"Create a typed edge between two memories. Edge types: caused_by (A was caused by B), contradicts (A conflicts with B), supersedes (A replaces B), related_to (general relation). Cost: DB write only, no LLM.",
+				inputSchema: {
+					source_id: z.string().describe("Source memory ID"),
+					target_id: z.string().describe("Target memory ID"),
+					edge_type: z.enum(EDGE_TYPES).describe("Relationship type"),
+					metadata: z
+						.record(z.string(), z.unknown())
+						.optional()
+						.describe("Optional metadata for the edge (max 4KB)")
+						.refine(
+							(v) => !v || JSON.stringify(v).length <= 4096,
+							"Metadata must be under 4KB when serialized",
+						),
+				},
+			},
+			async (args) => {
+				const source = db.getMemory(args.source_id);
+				if (!source) {
+					return {
+						isError: true,
+						content: [{ type: "text" as const, text: "Source memory not found." }],
+					};
+				}
+				const target = db.getMemory(args.target_id);
+				if (!target) {
+					return {
+						isError: true,
+						content: [{ type: "text" as const, text: "Target memory not found." }],
+					};
+				}
+
+				try {
+					const edge = await graph.addEdge({
+						sourceMemoryId: args.source_id,
+						targetMemoryId: args.target_id,
+						edgeType: args.edge_type,
+						userId: apiKey.user_id,
+						metadata: args.metadata,
+					});
+					return {
+						content: [{ type: "text" as const, text: JSON.stringify(edge, null, 2) }],
+					};
+				} catch (err) {
+					return {
+						isError: true,
+						content: [
+							{
+								type: "text" as const,
+								text: err instanceof Error ? err.message : "Failed to create edge.",
+							},
+						],
+					};
+				}
+			},
+		);
+
+		server.registerTool(
+			"unlink",
+			{
+				description: "Remove an edge by its ID. Cost: DB write only, no LLM.",
+				inputSchema: {
+					edge_id: z.string().describe("The edge ID to remove"),
+				},
+			},
+			async (args) => {
+				const edge = await graph.getEdge(args.edge_id);
+				if (!edge) {
+					return {
+						isError: true,
+						content: [{ type: "text" as const, text: "Edge not found." }],
+					};
+				}
+
+				// Verify caller owns at least one endpoint
+				const ownsSource = db.getMemory(edge.source_memory_id);
+				const ownsTarget = db.getMemory(edge.target_memory_id);
+				if (!ownsSource && !ownsTarget) {
+					return {
+						isError: true,
+						content: [{ type: "text" as const, text: "Edge not found." }],
+					};
+				}
+
+				await graph.removeEdge(args.edge_id);
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: JSON.stringify({ edge_id: args.edge_id, removed: true }),
+						},
+					],
+				};
+			},
+		);
+
+		server.registerTool(
+			"related",
+			{
+				description:
+					"Find direct neighbors of a memory in the knowledge graph. Returns connected memories with edge types and directions. Cost: DB read only, no LLM.",
+				inputSchema: {
+					memory_id: z.string().describe("The memory ID to find neighbors for"),
+					edge_type: z.enum(EDGE_TYPES).optional().describe("Filter by edge type"),
+					direction: z
+						.enum(["outgoing", "incoming", "both"])
+						.optional()
+						.describe("Filter by direction (default: both)"),
+					limit: z.number().int().min(1).max(100).optional().describe("Max results (default 20)"),
+				},
+			},
+			async (args) => {
+				const memory = db.getMemory(args.memory_id);
+				if (!memory) {
+					return {
+						isError: true,
+						content: [{ type: "text" as const, text: "Memory not found." }],
+					};
+				}
+
+				const neighbors = await graph.getNeighbors(args.memory_id, {
+					edgeType: args.edge_type,
+					direction: args.direction,
+					limit: args.limit ?? 20,
+				});
+
+				// Only return neighbors the caller owns
+				const enriched = neighbors
+					.map((n) => {
+						const mem = db.getMemory(n.memory_id);
+						if (!mem) return null;
+						return { ...n, summary: mem.summary };
+					})
+					.filter((n) => n !== null);
+
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: JSON.stringify(enriched, null, 2),
+						},
+					],
+				};
+			},
+		);
+
+		server.registerTool(
+			"traverse",
+			{
+				description:
+					"Walk the knowledge graph from a starting memory using BFS. Finds causal chains, contradiction clusters, and related memory groups. Cost: multiple DB reads, no LLM.",
+				inputSchema: {
+					memory_id: z.string().describe("Starting memory ID"),
+					edge_types: z
+						.array(z.enum(EDGE_TYPES))
+						.optional()
+						.describe("Only follow these edge types (default: all)"),
+					max_depth: z
+						.number()
+						.int()
+						.min(1)
+						.max(5)
+						.optional()
+						.describe("Maximum traversal depth (default 3, max 5)"),
+					limit: z.number().int().min(1).max(100).optional().describe("Max results (default 20)"),
+				},
+			},
+			async (args) => {
+				const memory = db.getMemory(args.memory_id);
+				if (!memory) {
+					return {
+						isError: true,
+						content: [{ type: "text" as const, text: "Memory not found." }],
+					};
+				}
+
+				const results = await graph.traverse(args.memory_id, {
+					edgeTypes: args.edge_types,
+					maxDepth: args.max_depth,
+					limit: args.limit ?? 20,
+				});
+
+				// Only return nodes the caller owns
+				const enriched = results
+					.map((r) => {
+						const mem = db.getMemory(r.memory_id);
+						if (!mem) return null;
+						return { ...r, summary: mem.summary };
+					})
+					.filter((r) => r !== null);
+
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: JSON.stringify(enriched, null, 2),
+						},
+					],
+				};
+			},
+		);
+	}
 
 	server.registerPrompt(
 		"meditate",

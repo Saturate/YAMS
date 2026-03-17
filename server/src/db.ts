@@ -174,6 +174,24 @@ export function initDb(path?: string): Database {
 		"CREATE INDEX IF NOT EXISTS idx_observations_compressed ON observations(compressed) WHERE compressed = 0",
 	);
 
+	db.run(`
+		CREATE TABLE IF NOT EXISTS graph_edges (
+			id TEXT PRIMARY KEY,
+			source_memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+			target_memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+			edge_type TEXT NOT NULL,
+			metadata TEXT,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			created_by TEXT NOT NULL
+		)
+	`);
+	db.run("CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_memory_id)");
+	db.run("CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_memory_id)");
+	db.run("CREATE INDEX IF NOT EXISTS idx_graph_edges_type ON graph_edges(edge_type)");
+	db.run(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_edges_unique ON graph_edges(source_memory_id, target_memory_id, edge_type)",
+	);
+
 	// Migration: add enrichment columns to observations
 	const obsCols = db.query<{ name: string }, []>("PRAGMA table_info(observations)").all();
 	const obsColNames = new Set(obsCols.map((c) => c.name));
@@ -367,6 +385,7 @@ export function createMemory(params: {
 
 const EXPIRY_FILTER = "(m.expires_at IS NULL OR m.expires_at > datetime('now'))";
 
+/** @internal System use only — user-facing code should use UserScope */
 export function getMemory(id: string): MemoryRow | undefined {
 	return (
 		db
@@ -428,6 +447,7 @@ export function updateMemorySummary(id: string, summary: string): void {
 	db.query("UPDATE memories SET summary = ? WHERE id = ?").run(summary, id);
 }
 
+/** @internal System use only — user-facing code should use UserScope */
 export function deleteMemory(id: string): boolean {
 	const result = db.query("DELETE FROM memories WHERE id = ?").run(id);
 	return result.changes > 0;
@@ -648,6 +668,7 @@ export function updateSessionSummary(id: string, summary: string): void {
 	db.query("UPDATE sessions SET summary = ? WHERE id = ?").run(summary, id);
 }
 
+/** @internal System use only — user-facing code should use UserScope */
 export function getSession(id: string): SessionRow | undefined {
 	return db.query<SessionRow, [string]>("SELECT * FROM sessions WHERE id = ?").get(id) ?? undefined;
 }
@@ -729,6 +750,7 @@ export function countSessions(opts?: { userId?: string; status?: string }): numb
 	return row?.count ?? 0;
 }
 
+/** @internal System use only — user-facing code should use UserScope */
 export function deleteSession(id: string): boolean {
 	const txn = db.transaction(() => {
 		db.query("DELETE FROM observations WHERE session_id = ?").run(id);
@@ -781,6 +803,7 @@ export function createObservation(params: {
 	return id;
 }
 
+/** @internal System use only — user-facing code should use UserScope */
 export function getObservation(id: string): ObservationRow | undefined {
 	return (
 		db.query<ObservationRow, [string]>("SELECT * FROM observations WHERE id = ?").get(id) ??
@@ -922,4 +945,79 @@ export function getOrCreateJwtSecret(): string {
 	const secret = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
 	db.query("INSERT INTO config (key, value) VALUES (?, ?)").run("jwt_secret", secret);
 	return secret;
+}
+
+// --- UserScope: scoped data access for user-facing code ---
+
+/**
+ * Scoped data access that guarantees all queries are filtered by user ownership.
+ * User-facing code (MCP, admin routes, graph API) should use this instead of
+ * calling unscoped db functions directly.
+ */
+export class UserScope {
+	constructor(readonly userId: string) {}
+
+	// --- Memories ---
+
+	getMemory(id: string): MemoryRow | undefined {
+		return getMemoryForUser(id, this.userId);
+	}
+
+	listMemories(opts?: {
+		gitRemote?: string;
+		scope?: string;
+		limit?: number;
+		offset?: number;
+	}): MemoryRow[] {
+		return listMemories({ ...opts, userId: this.userId });
+	}
+
+	countMemories(opts?: { gitRemote?: string; scope?: string }): number {
+		return countMemories({ ...opts, userId: this.userId });
+	}
+
+	deleteMemory(id: string): boolean {
+		const memory = getMemoryForUser(id, this.userId);
+		if (!memory) return false;
+		return deleteMemory(id);
+	}
+
+	listGitRemotes(): string[] {
+		return listDistinctGitRemotes(this.userId);
+	}
+
+	listScopes(): string[] {
+		return listDistinctScopes(this.userId);
+	}
+
+	// --- Sessions ---
+
+	getSession(id: string): SessionRow | undefined {
+		return getSessionForUser(id, this.userId);
+	}
+
+	listSessions(opts?: {
+		project?: string;
+		status?: string;
+		limit?: number;
+		offset?: number;
+	}): SessionRow[] {
+		return listSessions({ ...opts, userId: this.userId });
+	}
+
+	countSessions(opts?: { status?: string }): number {
+		return countSessions({ ...opts, userId: this.userId });
+	}
+
+	deleteSession(id: string): boolean {
+		const session = getSessionForUser(id, this.userId);
+		if (!session) return false;
+		return deleteSession(id);
+	}
+
+	// --- Observations ---
+
+	getObservation(id: string): ObservationRow | undefined {
+		return getObservationForUser(id, this.userId);
+	}
 }

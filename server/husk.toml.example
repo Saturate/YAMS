@@ -28,6 +28,12 @@
 # url = ""
 # mode = "client"                # client | server
 
+[graph]
+# backend = "sqlite"             # sqlite | neo4j | none
+# url = "bolt://localhost:7687"  # neo4j connection URL
+# user = ""                      # neo4j username
+# password = ""                  # neo4j password
+
 [auth]
 # github_client_id = ""
 # github_client_secret = ""

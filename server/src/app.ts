@@ -7,6 +7,8 @@ import { NONCE, secureHeaders } from "hono/secure-headers";
 import { admin } from "./admin.js";
 import { auth, invites, keys, users } from "./auth.js";
 import { getDb } from "./db.js";
+import { graphApi } from "./graph-api.js";
+import { getGraphProviderOrNull } from "./graph.js";
 import { ingest } from "./ingest.js";
 import { mountMcp } from "./mcp.js";
 import { isGitHubOAuthEnabled, oauth } from "./oauth.js";
@@ -56,6 +58,15 @@ app.get("/health", async (c) => {
 		checks.vector_storage = "not configured";
 	}
 
+	const graphProvider = getGraphProviderOrNull();
+	if (graphProvider) {
+		try {
+			checks.graph = (await graphProvider.healthy()) ? "ok" : "error";
+		} catch {
+			checks.graph = "error";
+		}
+	}
+
 	const overall = checks.database === "ok" ? "ok" : "degraded";
 	return c.json({ status: overall, checks });
 });
@@ -82,6 +93,8 @@ app.get("/api/auth/providers", (c) => {
 		github: isGitHubOAuthEnabled(),
 	});
 });
+
+app.route("/api/graph", graphApi);
 
 app.route("/ingest", ingest);
 app.route("/hooks", sessions);

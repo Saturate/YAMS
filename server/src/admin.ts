@@ -3,13 +3,13 @@ import { Hono } from "hono";
 import { jwtMiddleware } from "./auth.js";
 import { parseSummary, setCompressionProvider } from "./compression.js";
 import {
+	UserScope,
 	countMemories,
 	countObservations,
 	countSessions,
 	deleteConfig,
 	deleteMemory,
 	deleteSession,
-	getApiKeyById,
 	getConfig,
 	getMemory,
 	getSession,
@@ -95,9 +95,12 @@ admin.post("/search", async (c) => {
 		);
 
 		// Enrich with full memory data from SQLite
+		const getMemoryFn = isAdmin
+			? (id: string) => getMemory(id)
+			: (id: string) => new UserScope(c.get("userId")).getMemory(id);
 		const memories = results
 			.map((r) => {
-				const memory = getMemory(r.id);
+				const memory = getMemoryFn(r.id);
 				if (!memory) return null;
 				return { score: r.score, ...memory };
 			})
@@ -128,21 +131,19 @@ admin.get("/memories", (c) => {
 
 admin.delete("/memories/:id", async (c) => {
 	const id = c.req.param("id");
-	const memory = getMemory(id);
 
-	if (!memory) {
-		return c.json({ error: "Memory not found." }, 404);
-	}
-
-	// Non-admin users can only delete their own memories
 	if (c.get("role") !== "admin") {
-		const key = getApiKeyById(memory.api_key_id);
-		if (!key || key.user_id !== c.get("userId")) {
+		const userDb = new UserScope(c.get("userId"));
+		if (!userDb.deleteMemory(id)) {
 			return c.json({ error: "Memory not found." }, 404);
 		}
+	} else {
+		const memory = getMemory(id);
+		if (!memory) {
+			return c.json({ error: "Memory not found." }, 404);
+		}
+		deleteMemory(id);
 	}
-
-	deleteMemory(id);
 
 	try {
 		await getStorageProvider().delete(id);
@@ -179,18 +180,12 @@ admin.get("/sessions", (c) => {
 
 admin.get("/sessions/:id", (c) => {
 	const id = c.req.param("id");
-	const session = getSession(id);
+
+	const session =
+		c.get("role") === "admin" ? getSession(id) : new UserScope(c.get("userId")).getSession(id);
 
 	if (!session) {
 		return c.json({ error: "Session not found." }, 404);
-	}
-
-	// Non-admin: check ownership
-	if (c.get("role") !== "admin") {
-		const key = getApiKeyById(session.api_key_id);
-		if (!key || key.user_id !== c.get("userId")) {
-			return c.json({ error: "Session not found." }, 404);
-		}
 	}
 
 	const observations = listObservations(session.id);
@@ -200,20 +195,20 @@ admin.get("/sessions/:id", (c) => {
 
 admin.delete("/sessions/:id", (c) => {
 	const id = c.req.param("id");
-	const session = getSession(id);
-
-	if (!session) {
-		return c.json({ error: "Session not found." }, 404);
-	}
 
 	if (c.get("role") !== "admin") {
-		const key = getApiKeyById(session.api_key_id);
-		if (!key || key.user_id !== c.get("userId")) {
+		const userDb = new UserScope(c.get("userId"));
+		if (!userDb.deleteSession(id)) {
 			return c.json({ error: "Session not found." }, 404);
 		}
+	} else {
+		const session = getSession(id);
+		if (!session) {
+			return c.json({ error: "Session not found." }, 404);
+		}
+		deleteSession(id);
 	}
 
-	deleteSession(id);
 	return c.json({ id, deleted: true });
 });
 

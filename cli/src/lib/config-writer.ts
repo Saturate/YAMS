@@ -30,6 +30,12 @@ export interface HuskConfig {
 		url?: string;
 		mode?: string;
 	};
+	graph?: {
+		backend?: string;
+		url?: string;
+		user?: string;
+		password?: string;
+	};
 	auth?: {
 		github_client_id?: string;
 		github_client_secret?: string;
@@ -95,6 +101,7 @@ export function mergeConfig(
 		"storage",
 		"embeddings",
 		"compression",
+		"graph",
 		"auth",
 	] as const) {
 		if (overrides[section]) {

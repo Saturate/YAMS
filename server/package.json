@@ -21,6 +21,9 @@
 		"sqlite-vec": "^0.1.7-alpha.2",
 		"zod": "^4.3.6"
 	},
+	"optionalDependencies": {
+		"neo4j-driver": "^5.28.1"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
 		"@types/bun": "^1.2.4"
