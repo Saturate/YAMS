@@ -542,7 +542,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					target_id: z.string().describe("Target memory ID"),
 					edge_type: z.enum(EDGE_TYPES).describe("Relationship type"),
 					metadata: z
-						.record(z.unknown())
+						.record(z.string(), z.unknown())
 						.optional()
 						.describe("Optional metadata for the edge (max 4KB)")
 						.refine(
