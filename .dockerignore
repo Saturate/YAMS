@@ -8,6 +8,8 @@ server/data/
 *.db-shm
 .git/
 .claude/
+cli/
+!cli/package.json
 website/
 !website/package.json
 **/*.test.ts
