@@ -606,8 +606,9 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 				};
 			}
 
-			// Verify all observations belong to the same session
-			const firstObs = db.getObservation(args.observation_ids[0]);
+			// Verify all observations belong to the same session (min 1 guaranteed by schema)
+			const [firstId] = args.observation_ids;
+			const firstObs = firstId ? db.getObservation(firstId) : undefined;
 			if (!firstObs) {
 				return {
 					isError: true,
