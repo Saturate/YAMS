@@ -1,0 +1,30 @@
+{
+	"name": "@huskai/opencode",
+	"version": "0.0.0",
+	"description": "HUSK plugin for OpenCode — session tracking with file-edit history",
+	"type": "module",
+	"main": "src/index.ts",
+	"files": ["src"],
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Saturate/HUSK.git",
+		"directory": "plugins/opencode"
+	},
+	"homepage": "https://github.com/Saturate/HUSK/tree/main/plugins/opencode",
+	"bugs": {
+		"url": "https://github.com/Saturate/HUSK/issues"
+	},
+	"keywords": ["husk", "opencode", "plugin", "memory", "mcp", "ai", "coding-assistant"],
+	"scripts": {
+		"typecheck": "tsc -b --noEmit",
+		"changelog": "git-cliff --include-path 'plugins/opencode/**' -o plugins/opencode/CHANGELOG.md"
+	},
+	"license": "MIT",
+	"devDependencies": {
+		"@opencode-ai/plugin": "^1.2.27",
+		"@types/node": "^25.5.0"
+	}
+}

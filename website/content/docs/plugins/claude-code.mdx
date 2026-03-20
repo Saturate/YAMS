@@ -1,0 +1,80 @@
+---
+title: Claude Code Plugin
+description: Session hooks and skills for Claude Code.
+---
+
+The Claude Code plugin adds session lifecycle hooks and user-invocable skills on top of the [MCP tools](/docs/mcp-tools).
+
+## Installation
+
+```bash
+claude plugin add /path/to/HUSK/plugins/claude-code
+```
+
+Or copy the `plugins/claude-code/` directory into your project manually.
+
+## Configuration
+
+The plugin needs `HUSK_URL` and `HUSK_KEY` environment variables. The easiest way to set them up is with the CLI:
+
+```bash
+npx @huskai/cli init
+```
+
+This writes credentials to `~/.husk/credentials.json` and sets the env vars in your shell profile. The `/husk-init` skill can also do this interactively from within Claude Code.
+
+## Hooks
+
+### SessionStart
+
+Runs when a Claude Code session begins.
+
+1. Checks if HUSK is reachable via `GET /health`
+2. If not, attempts to start it with `npx husk`
+
+### SessionEnd
+
+Runs when a session ends (or errors). Receives session event JSON on stdin and POSTs a summary to `/ingest` with:
+
+- `session_id`, `cwd`, `session_end_reason`
+- `git_remote` (auto-detected from the working directory)
+- `scope: "session"`
+
+This creates a session memory so you can pick up where you left off next time.
+
+## Skills
+
+### `/husk-init`
+
+Interactive first-time setup wizard. Walks you through:
+
+1. Setting the server URL
+2. Verifying connectivity
+3. Logging in with admin credentials
+4. Creating a machine API key
+5. Writing `HUSK_URL` and `HUSK_KEY` to your shell profile
+
+### `/husk-search`
+
+Search HUSK memories inline. Automatically scopes to the current project via git remote.
+
+```
+/husk-search how does the auth middleware work
+```
+
+### `/husk-remember`
+
+Save a memory to HUSK. Automatically determines the right scope (session, project, or global).
+
+```
+/husk-remember the deploy script requires Node 20+
+```
+
+## What it adds beyond MCP
+
+| Capability | MCP | Plugin |
+|---|---|---|
+| Search & remember | ✅ | ✅ (also via skills) |
+| Session auto-ingest | ❌ | ✅ |
+| Auto-start server | ❌ | ✅ |
+| Setup wizard | ❌ | ✅ |

@@ -6,6 +6,7 @@ import { statusCommand } from "./commands/status.js";
 import { logsCommand } from "./commands/logs.js";
 import { serverSetupCommand } from "./commands/server-setup.js";
 import { deployCommand } from "./commands/deploy.js";
+import { syncCommand } from "./commands/sync.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -34,6 +35,7 @@ Commands:
   config         View/edit existing husk.toml interactively
   stop           Stop the running server
   status         Show server status, port, version
+  sync           Sync memories from AI clients (Claude Code, etc.) into HUSK
   logs           Tail ~/.husk/husk.log
 
 Options:
@@ -72,6 +74,9 @@ async function main() {
 				break;
 			case "config":
 				await configCommand();
+				break;
+			case "sync":
+				await syncCommand();
 				break;
 			case "stop":
 				await stopCommand();

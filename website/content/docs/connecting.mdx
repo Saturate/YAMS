@@ -29,24 +29,14 @@ Create `.mcp.json` in your project root:
 
 Place the same file at `~/.claude/.mcp.json` so every Claude Code session has access.
 
-## Claude Code plugin
+## Plugins
 
-The plugin adds session-end hooks and skills on top of the MCP tools:
+For session tracking, auto-start, and editor-specific skills, install a plugin on top of MCP:
 
-```bash
-claude plugin add /path/to/HUSK/plugins/claude-code
-```
+- [Claude Code plugin](/docs/plugins/claude-code) — hooks + skills for Claude Code
+- [OpenCode plugin](/docs/plugins/opencode) — hooks with file-edit tracking for OpenCode
 
-### Environment variables
-
-The plugin needs to know where HUSK is running:
-
-| Variable | Description |
-|---|---|
-| `HUSK_URL` | Server URL (e.g. `http://localhost:3000`) |
-| `HUSK_KEY` | API key (`husk_...`) |
-
-Set them in your shell profile or `.env` file.
+See the [Plugins overview](/docs/plugins) for a feature comparison.
 
 ## Verifying the connection
 

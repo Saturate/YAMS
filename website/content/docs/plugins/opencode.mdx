@@ -1,0 +1,95 @@
+---
+title: OpenCode Plugin
+description: Session hooks and file-edit tracking for OpenCode.
+---
+
+The OpenCode plugin adds session lifecycle hooks with **file-edit tracking** on top of the [MCP tools](/docs/mcp-tools). When a session ends, HUSK knows not just _that_ you worked, but _which files_ you touched.
+
+## Installation
+
+### From npm
+
+Add `@huskai/opencode` to the `plugin` array in your `opencode.json`:
+
+```json
+{
+  "plugin": ["@huskai/opencode"]
+}
+```
+
+That's it — the plugin registers the MCP server automatically from your `~/.husk/credentials.json`. No manual `mcpServers` config needed.
+
+OpenCode auto-installs npm plugins via Bun at startup (cached in `~/.cache/opencode/node_modules/`).
+
+### From local directory
+
+Files in `.opencode/plugins/` are auto-discovered at startup — no config entry needed. Symlink or copy the plugin:
+
+```bash
+ln -s /path/to/HUSK/plugins/opencode .opencode/plugins/husk
+```
+
+OpenCode runs plugins via Bun, so TS source works directly — no build step needed.
+
+## Configuration
+
+The plugin reads credentials from `~/.husk/credentials.json` — the same file written by `npx @huskai/cli init`. If you've already run the [CLI setup](/docs/cli), the plugin works out of the box with no extra config.
+
+```json
+{
+  "url": "https://husk.example.com",
+  "apiKey": "husk_...",
+  "username": "admin"
+}
+```
+
+Environment variables `HUSK_URL` and `HUSK_KEY` take priority if set, but typically you won't need them.
+
+## Hooks
+
+### `shell.env`
+
+Injects `HUSK_URL` and `HUSK_KEY` into subprocess environments so spawned tools and scripts can reach the server without manual configuration.
+
+### `session.created`
+
+Runs when an OpenCode session starts.
+
+1. Records the session ID
+2. Checks if HUSK is reachable via `GET /health`
+3. If not, attempts to start it with `npx husk`
+
+### `file.edited`
+
+Fires on every file edit. The plugin tracks edited file paths in memory and flushes the full list when the session ends. This is the key advantage over the Claude Code plugin — you get a complete edit history per session.
+
+### `session.deleted` / `session.error`
+
+Runs when a session ends normally or with an error. POSTs a summary to `/ingest` with:
+
+```json
+{
+  "summary": "Coding session on my-project (ended)",
+  "git_remote": "owner/repo",
+  "scope": "session",
+  "metadata": {
+    "session_id": "...",
+    "reason": "ended",
+    "cwd": "/path/to/project",
+    "files_edited": ["src/index.ts", "src/util.ts"]
+  }
+}
+```
+
+The `files_edited` array is unique to this plugin — it lets you (or your AI assistant) quickly see what changed in previous sessions.
+
+## What it adds beyond MCP
+
+| Capability | MCP | Plugin |
+|---|---|---|
+| Search & remember | ✅ | ✅ |
+| Auto MCP registration | ❌ | ✅ |
+| Session auto-ingest | ❌ | ✅ |
+| Auto-start server | ❌ | ✅ |
+| File edit tracking | ❌ | ✅ |
+| Shell env injection | ❌ | ✅ |

@@ -1,0 +1,29 @@
+---
+title: Plugins
+description: What HUSK plugins add beyond raw MCP, and which one to use.
+---
+
+HUSK's MCP server gives any compatible client access to the full tool suite — search, remember, graph, sessions. Plugins build on top of that with **session lifecycle hooks**, **environment injection**, and **editor-specific skills** that MCP alone can't provide.
+
+## Feature comparison
+
+| Feature | MCP only | + Claude Code plugin | + OpenCode plugin |
+|---|---|---|---|
+| Core tools (search, remember, graph…) | ✅ | ✅ | ✅ |
+| Auto MCP registration | ❌ | ❌ | ✅ |
+| Session tracking (auto-ingest) | ❌ | ✅ | ✅ |
+| Auto-start server | ❌ | ✅ | ✅ |
+| File edit tracking | ❌ | ❌ | ✅ |
+| Shell env injection | ❌ | ❌ | ✅ |
+| Setup wizard skill | ❌ | ✅ | ❌ (use CLI) |
+
+## When do you need a plugin?
+
+If you only want to **search and store memories**, MCP alone is enough — just add the server to your client's MCP config ([see Connecting](/docs/connecting)).
+
+Install a plugin when you want **automatic session tracking**: the plugin records what you worked on and (for OpenCode) which files you touched, so you can resume context across sessions without manually calling `remember`.
+
+## Available plugins
+
+- [Claude Code](/docs/plugins/claude-code) — hooks + skills for Claude Code
+- [OpenCode](/docs/plugins/opencode) — hooks for OpenCode with file-edit tracking (`@huskai/opencode`)
