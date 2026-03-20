@@ -896,7 +896,9 @@ export function markObservationsByIds(ids: string[]): number {
 	if (ids.length === 0) return 0;
 	const placeholders = ids.map(() => "?").join(", ");
 	const result = db
-		.query(`UPDATE observations SET compressed = 1 WHERE id IN (${placeholders}) AND compressed = 0`)
+		.query(
+			`UPDATE observations SET compressed = 1 WHERE id IN (${placeholders}) AND compressed = 0`,
+		)
 		.run(...ids);
 	return result.changes;
 }

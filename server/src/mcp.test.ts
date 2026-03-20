@@ -909,7 +909,11 @@ describe("Client compression MCP tools", () => {
 			claudeSessionId: "other-user-obs",
 			apiKeyId: adminKeyId,
 		});
-		const obsId = createObservation({ sessionId: sessId, event: "UserPromptSubmit", content: "{}" });
+		const obsId = createObservation({
+			sessionId: sessId,
+			event: "UserPromptSubmit",
+			content: "{}",
+		});
 
 		// Create a different user
 		const userB = await createRegularUser(app, adminToken, "userB-compress", "password123");

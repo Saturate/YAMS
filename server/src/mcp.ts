@@ -587,7 +587,9 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 				summary: z
 					.string()
 					.max(10000)
-					.describe("Structured summary of the observations (Request/Completed/Learned/Next Steps)"),
+					.describe(
+						"Structured summary of the observations (Request/Completed/Learned/Next Steps)",
+					),
 			},
 		},
 		async (args) => {
@@ -595,7 +597,12 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			if (!db.validateObservationIds(args.observation_ids)) {
 				return {
 					isError: true,
-					content: [{ type: "text" as const, text: "One or more observation IDs not found or not owned by you." }],
+					content: [
+						{
+							type: "text" as const,
+							text: "One or more observation IDs not found or not owned by you.",
+						},
+					],
 				};
 			}
 
@@ -612,7 +619,9 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			if (!validateObservationsBelongToSession(args.observation_ids, sessionId)) {
 				return {
 					isError: true,
-					content: [{ type: "text" as const, text: "All observations must belong to the same session." }],
+					content: [
+						{ type: "text" as const, text: "All observations must belong to the same session." },
+					],
 				};
 			}
 

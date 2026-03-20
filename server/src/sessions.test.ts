@@ -348,7 +348,11 @@ describe("Hook endpoints", () => {
 				apiKeyId,
 			});
 
-			const id1 = createObservation({ sessionId: sessId, event: "UserPromptSubmit", content: "{}" });
+			const id1 = createObservation({
+				sessionId: sessId,
+				event: "UserPromptSubmit",
+				content: "{}",
+			});
 			const id2 = createObservation({ sessionId: sessId, event: "PostToolUse", content: "{}" });
 			const id3 = createObservation({ sessionId: sessId, event: "PostToolUse", content: "{}" });
 
@@ -419,7 +423,11 @@ describe("Hook endpoints", () => {
 				apiKeyId,
 			});
 
-			const id1 = createObservation({ sessionId: sessId, event: "UserPromptSubmit", content: "{}" });
+			const id1 = createObservation({
+				sessionId: sessId,
+				event: "UserPromptSubmit",
+				content: "{}",
+			});
 
 			const { getApiKeyById } = await import("./db.js");
 			const key = getApiKeyById(apiKeyId);
