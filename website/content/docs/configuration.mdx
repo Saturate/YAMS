@@ -58,7 +58,7 @@ Session compression summarizes observations into searchable memories.
 | `compression.api_key` | `HUSK_COMPRESSION_API_KEY` | — | API key (Anthropic, OpenRouter) |
 | `compression.model` | `HUSK_COMPRESSION_MODEL` | provider-specific | Model for summarization |
 | `compression.url` | `HUSK_COMPRESSION_URL` | provider-specific | Base URL (OpenRouter, Ollama) |
-| `compression.mode` | `HUSK_COMPRESSION_MODE` | `client` | `client` (disabled) or `server` (server-side) |
+| `compression.mode` | `HUSK_COMPRESSION_MODE` | `client` | `client` or `server` — see [compression modes](#compression-modes) |
 | `compression.batch_size` | `HUSK_COMPRESSION_BATCH_SIZE` | `20` | Observations per batch before compressing (5–100) |
 | `compression.interval_minutes` | `HUSK_COMPRESSION_INTERVAL_MINUTES` | `15` | Minutes of inactivity before compressing stale sessions (5–60) |
 
@@ -70,7 +70,11 @@ Session compression summarizes observations into searchable memories.
 | `openrouter` | `anthropic/claude-haiku-4-5-20251001` | `https://openrouter.ai/api/v1` | Yes |
 | `ollama` | `llama3.2` | `http://localhost:11434` | No |
 
-Compression triggers when `mode = "server"`: batch threshold reached, session ends, or no observations for `interval_minutes`.
+### Compression modes
+
+**`client`** (default) — the server is dumb storage. Plugins stream observations to the server throughout the session. When uncompressed observations hit `batch_size`, the plugin injects a prompt into the LLM conversation. The LLM reads observations via `get_uncompressed_observations`, writes a summary, and posts it back via `compress_observations`. No server-side LLM or API key needed — the client's own LLM does all summarization.
+
+**`server`** — the server runs its own LLM to compress observations. Requires a compression provider config (Anthropic API key, OpenRouter, or Ollama). Triggers on: batch threshold reached, session ends, or no observations for `interval_minutes`.
 
 ## Graph
 

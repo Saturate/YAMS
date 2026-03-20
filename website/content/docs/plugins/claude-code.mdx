@@ -32,13 +32,26 @@ Runs when a Claude Code session begins.
 1. Checks if HUSK is reachable via `GET /health`
 2. If not, attempts to start it with `npx husk`
 
+### PostToolUse / UserPromptSubmit / Stop
+
+Observation hooks that stream session activity to HUSK in real time. Each hook fires `observation.sh`, which:
+
+1. Reads hook JSON from stdin and resolves credentials (env vars or `~/.husk/credentials.json`)
+2. POSTs to `/hooks/observation` with session ID, event type, tool name, and a content snippet
+3. Checks the `uncompressed_count` in the response
+4. When count reaches the compression threshold (default 20), returns `additionalContext` telling the LLM to run the `compress_session` prompt
+
+This enables **client-side compression** — the LLM summarizes its own observations without needing a server-side LLM. See [Compression modes](/docs/configuration#compression-modes).
+
 ### SessionEnd
 
-Runs when a session ends (or errors). Receives session event JSON on stdin and POSTs a summary to `/ingest` with:
+Runs when a session ends (or errors). Receives session event JSON on stdin, notifies the server via `/hooks/session-end`, and POSTs a summary to `/ingest` with:
 
 - `session_id`, `cwd`, `session_end_reason`
 - `git_remote` (auto-detected from the working directory)
 - `scope: "session"`
+
+Credentials are resolved from env vars or `~/.husk/credentials.json`.
 
 This creates a session memory so you can pick up where you left off next time.
 
@@ -75,6 +88,8 @@ Save a memory to HUSK. Automatically determines the right scope (session, projec
 | Capability | MCP | Plugin |
 |---|---|---|
 | Search & remember | ✅ | ✅ (also via skills) |
+| Observation streaming | ❌ | ✅ |
+| Client-side compression | ❌ | ✅ |
 | Session auto-ingest | ❌ | ✅ |
 | Auto-start server | ❌ | ✅ |
 | Setup wizard | ❌ | ✅ |

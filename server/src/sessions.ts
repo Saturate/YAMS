@@ -141,7 +141,14 @@ sessions.post("/session-start", async (c) => {
 		return `- ${date}${proj}: ${s.summary}`;
 	});
 
-	const additionalContext = `Previous session context:\n${contextLines.join("\n")}`;
+	let additionalContext = `Previous session context:\n${contextLines.join("\n")}`;
+
+	// When compression is client-mode, tell the LLM how to compress
+	const compressionMode = getConfigWithEnv("compression_mode", "HUSK_COMPRESSION_MODE") ?? "client";
+	if (compressionMode === "client") {
+		additionalContext +=
+			"\n\nHUSK compression mode: client. When prompted about observation compression, use the compress_session prompt to summarize accumulated observations.";
+	}
 
 	return c.json(
 		{
@@ -234,6 +241,8 @@ sessions.post("/observation", async (c) => {
 
 		const uncompressedCount = countUncompressedObservations(session.id);
 		bus.emit("observation:created", { sessionId: session.id, uncompressedCount });
+
+		return c.json({ uncompressed_count: uncompressedCount }, 200);
 	} catch (err) {
 		log.error("Failed to create observation: {error}", {
 			error: err instanceof Error ? err.message : String(err),

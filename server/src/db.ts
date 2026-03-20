@@ -891,6 +891,64 @@ export function markObservationsCompressed(sessionId: string): void {
 	);
 }
 
+/** Marks only the specified observation IDs as compressed. Returns count of rows affected. */
+export function markObservationsByIds(ids: string[]): number {
+	if (ids.length === 0) return 0;
+	const placeholders = ids.map(() => "?").join(", ");
+	const result = db
+		.query(
+			`UPDATE observations SET compressed = 1 WHERE id IN (${placeholders}) AND compressed = 0`,
+		)
+		.run(...ids);
+	return result.changes;
+}
+
+/** Returns uncompressed observations for a session, scoped to the owning user. */
+export function getUncompressedObservationsForUser(
+	sessionId: string,
+	userId: string,
+	limit?: number,
+): ObservationRow[] {
+	const effectiveLimit = Math.min(Math.max(limit ?? 50, 1), 100);
+	return db
+		.query<ObservationRow, [string, string, number]>(
+			`SELECT o.* FROM observations o
+			 JOIN sessions s ON o.session_id = s.id
+			 JOIN api_keys k ON s.api_key_id = k.id
+			 WHERE o.session_id = ? AND k.user_id = ? AND o.compressed = 0
+			 ORDER BY o.created_at ASC
+			 LIMIT ?`,
+		)
+		.all(sessionId, userId, effectiveLimit);
+}
+
+/** Verifies all observation IDs belong to a single session. */
+export function validateObservationsBelongToSession(ids: string[], sessionId: string): boolean {
+	if (ids.length === 0) return true;
+	const placeholders = ids.map(() => "?").join(", ");
+	const row = db
+		.query<{ count: number }, string[]>(
+			`SELECT COUNT(*) as count FROM observations WHERE id IN (${placeholders}) AND session_id = ?`,
+		)
+		.get(...ids, sessionId);
+	return (row?.count ?? 0) === ids.length;
+}
+
+/** Verifies all observation IDs belong to sessions owned by this user. */
+export function validateObservationIds(ids: string[], userId: string): boolean {
+	if (ids.length === 0) return true;
+	const placeholders = ids.map(() => "?").join(", ");
+	const row = db
+		.query<{ count: number }, string[]>(
+			`SELECT COUNT(*) as count FROM observations o
+			 JOIN sessions s ON o.session_id = s.id
+			 JOIN api_keys k ON s.api_key_id = k.id
+			 WHERE o.id IN (${placeholders}) AND k.user_id = ?`,
+		)
+		.get(...ids, userId);
+	return (row?.count ?? 0) === ids.length;
+}
+
 export function getStaleActiveSessions(intervalMinutes: number): SessionRow[] {
 	return db
 		.query<SessionRow, [number]>(
@@ -1019,5 +1077,13 @@ export class UserScope {
 
 	getObservation(id: string): ObservationRow | undefined {
 		return getObservationForUser(id, this.userId);
+	}
+
+	getUncompressedObservations(sessionId: string, limit?: number): ObservationRow[] {
+		return getUncompressedObservationsForUser(sessionId, this.userId, limit);
+	}
+
+	validateObservationIds(ids: string[]): boolean {
+		return validateObservationIds(ids, this.userId);
 	}
 }

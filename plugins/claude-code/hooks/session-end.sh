@@ -1,10 +1,21 @@
 #!/bin/bash
-# HUSK SessionEnd hook - records session metadata as a memory
+# HUSK SessionEnd hook - records session metadata as a memory and notifies the server
 # Receives session event JSON on stdin
 
 set -euo pipefail
 
-# Bail if HUSK isn't configured
+# --- Resolve credentials: env vars > ~/.husk/credentials.json ---
+
+HUSK_HOME="${HUSK_HOME:-$HOME/.husk}"
+
+if [ -z "${HUSK_URL:-}" ] || [ -z "${HUSK_KEY:-}" ]; then
+	CREDS_FILE="${HUSK_HOME}/credentials.json"
+	if [ -f "$CREDS_FILE" ]; then
+		HUSK_URL="${HUSK_URL:-$(jq -r '.url // empty' "$CREDS_FILE")}"
+		HUSK_KEY="${HUSK_KEY:-$(jq -r '.apiKey // empty' "$CREDS_FILE")}"
+	fi
+fi
+
 [ -z "${HUSK_URL:-}" ] || [ -z "${HUSK_KEY:-}" ] && exit 0
 
 SESSION_DATA=$(cat)
@@ -22,6 +33,13 @@ fi
 
 PROJECT_NAME=$(basename "${CWD:-unknown}")
 
+# Notify server that session ended
+curl -sf --max-time 2 -X POST "${HUSK_URL}/hooks/session-end" \
+	-H "Authorization: Bearer ${HUSK_KEY}" \
+	-H "Content-Type: application/json" \
+	-d "$(jq -n --arg sid "$SESSION_ID" '{session_id: $sid}')" >/dev/null 2>&1 || true
+
+# Post session summary as a memory
 curl -sf -X POST "${HUSK_URL}/ingest" \
 	-H "Authorization: Bearer ${HUSK_KEY}" \
 	-H "Content-Type: application/json" \

@@ -1,10 +1,15 @@
 import { execSync } from "node:child_process";
 import type { Plugin } from "@opencode-ai/plugin";
-import { checkHealth, postIngest } from "./husk-client.js";
+import { checkHealth, postIngest, postObservation } from "./husk-client.js";
 import { getGitRemote, getProjectName, loadCredentials } from "./util.js";
 
 // Per-session state — keyed by session ID to handle concurrent sessions
 const sessions = new Map<string, Set<string>>();
+
+// Tracks which sessions need compression injection (one-shot flag)
+const needsCompression = new Set<string>();
+
+const COMPRESSION_THRESHOLD = Number(process.env.HUSK_COMPRESSION_BATCH_SIZE ?? "20");
 
 function tryAutoStart() {
 	try {
@@ -21,6 +26,29 @@ export const HuskPlugin: Plugin = async ({ directory }) => {
 	const creds = loadCredentials();
 	const url = process.env.HUSK_URL ?? creds?.url;
 	const key = process.env.HUSK_KEY ?? creds?.apiKey;
+
+	/** Fire-and-forget observation POST; sets compression flag when threshold is hit. */
+	async function sendObservation(
+		sessionId: string,
+		event: string,
+		extra?: { tool_name?: string; prompt?: string; tool_input?: unknown; tool_response?: string },
+	) {
+		if (!url || !key) return;
+
+		const resp = await postObservation(url, key, {
+			session_id: sessionId,
+			event,
+			cwd,
+			tool_name: extra?.tool_name ?? null,
+			prompt: extra?.prompt ?? null,
+			tool_input: extra?.tool_input ?? null,
+			tool_response: extra?.tool_response?.slice(0, 2000) ?? null,
+		});
+
+		if (resp.uncompressed_count && resp.uncompressed_count >= COMPRESSION_THRESHOLD) {
+			needsCompression.add(sessionId);
+		}
+	}
 
 	async function flushSession(sessionId: string, reason: string) {
 		if (!url || !key) return;
@@ -43,6 +71,7 @@ export const HuskPlugin: Plugin = async ({ directory }) => {
 			// best-effort — never block the editor
 		} finally {
 			sessions.delete(sessionId);
+			needsCompression.delete(sessionId);
 		}
 	}
 
@@ -76,6 +105,22 @@ export const HuskPlugin: Plugin = async ({ directory }) => {
 				}
 			}
 
+			// Stream observations for user messages
+			if (event.type === "message.updated") {
+				const msg = event.properties.info as Record<string, unknown>;
+				if (msg.role === "user") {
+					// Find the active session — message events don't carry session ID directly
+					for (const sid of sessions.keys()) {
+						const parts = msg.parts as Array<{ type: string; text?: string }> | undefined;
+						const prompt = parts
+							?.filter((p) => p.type === "text" && typeof p.text === "string")
+							.map((p) => p.text)
+							.join("\n");
+						sendObservation(sid, "UserPromptSubmit", { prompt }).catch(() => {});
+					}
+				}
+			}
+
 			if (event.type === "session.deleted") {
 				const sid = event.properties.info.id;
 				await flushSession(sid, "ended");
@@ -84,6 +129,26 @@ export const HuskPlugin: Plugin = async ({ directory }) => {
 			if (event.type === "session.error") {
 				const sid = event.properties.sessionID;
 				if (sid) await flushSession(sid, "error");
+			}
+		},
+
+		// Stream observations for tool executions
+		"tool.execute.after": async (input, output) => {
+			sendObservation(input.sessionID, "PostToolUse", {
+				tool_name: input.tool,
+				tool_input: input.args,
+				tool_response: typeof output.output === "string" ? output.output : undefined,
+			}).catch(() => {});
+		},
+
+		// Inject compression prompt when threshold is hit
+		"experimental.chat.system.transform": async (_input, output) => {
+			for (const sid of needsCompression) {
+				needsCompression.delete(sid);
+				output.system.push(
+					`HUSK has accumulated uncompressed observations for session ${sid}. Please use the compress_session prompt (session_id: ${sid}) to summarize them.`,
+				);
+				break;
 			}
 		},
 

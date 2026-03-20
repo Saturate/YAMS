@@ -12,6 +12,9 @@ import {
 	getRecentSessionSummaries,
 	getSessionFilesModified,
 	listObservations,
+	markObservationsByIds,
+	updateSessionSummary,
+	validateObservationsBelongToSession,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import { EDGE_TYPES, getGraphProviderOrNull } from "./graph.js";
@@ -39,6 +42,15 @@ function fitTokenBudget<T>(memories: T[], maxTokens: number): T[] {
 	}
 
 	return result;
+}
+
+function parseFilesModified(raw: string | null): string[] | undefined {
+	if (!raw) return undefined;
+	try {
+		return JSON.parse(raw) as string[];
+	} catch {
+		return undefined;
+	}
 }
 
 function createMcpServer(apiKey: ValidatedApiKey): McpServer {
@@ -406,14 +418,6 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			const observations = listObservations(session.id).map((o) => {
 				// Use enriched columns when available, fall back to JSON parse
 				if (o.prompt || o.tool_input_summary) {
-					let parsedFiles: string[] | undefined;
-					if (o.files_modified) {
-						try {
-							parsedFiles = JSON.parse(o.files_modified);
-						} catch {
-							/* malformed JSON — skip */
-						}
-					}
 					return {
 						id: o.id,
 						event: o.event,
@@ -421,7 +425,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 						created_at: o.created_at,
 						prompt: o.prompt ?? undefined,
 						tool_input_summary: o.tool_input_summary ?? undefined,
-						files_modified: parsedFiles,
+						files_modified: parseFilesModified(o.files_modified),
 					};
 				}
 
@@ -510,19 +514,160 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 								tool_input: parsed.tool_input ?? undefined,
 								tool_response: parsed.tool_response ?? undefined,
 								tool_input_summary: observation.tool_input_summary ?? undefined,
-								files_modified: observation.files_modified
-									? (() => {
-											try {
-												return JSON.parse(observation.files_modified);
-											} catch {
-												return undefined;
-											}
-										})()
-									: undefined,
+								files_modified: parseFilesModified(observation.files_modified),
 							},
 							null,
 							2,
 						),
+					},
+				],
+			};
+		},
+	);
+
+	// --- Client compression tools ---
+
+	server.registerTool(
+		"get_uncompressed_observations",
+		{
+			description:
+				"Get uncompressed observations for a session. Used during client-side compression to read observations before summarizing them. Cost: DB read only, no LLM.",
+			inputSchema: {
+				session_id: z.string().describe("The session ID to get observations for"),
+				limit: z
+					.number()
+					.int()
+					.min(1)
+					.max(100)
+					.optional()
+					.describe("Max observations to return (default 50, max 100)"),
+			},
+		},
+		(args) => {
+			const observations = db.getUncompressedObservations(args.session_id, args.limit);
+
+			if (observations.length === 0) {
+				return {
+					content: [{ type: "text" as const, text: "No uncompressed observations found." }],
+				};
+			}
+
+			const formatted = observations.map((o) => ({
+				id: o.id,
+				event: o.event,
+				tool_name: o.tool_name,
+				prompt: o.prompt ?? undefined,
+				tool_input_summary: o.tool_input_summary ?? undefined,
+				files_modified: parseFilesModified(o.files_modified),
+				created_at: o.created_at,
+			}));
+
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(formatted, null, 2),
+					},
+				],
+			};
+		},
+	);
+
+	server.registerTool(
+		"compress_observations",
+		{
+			description:
+				"Mark observations as compressed and store their summary as a memory. Called after get_uncompressed_observations + LLM summarization. Cost: DB write + embedding + vector write, no LLM.",
+			inputSchema: {
+				observation_ids: z
+					.array(z.string())
+					.min(1)
+					.max(100)
+					.describe("IDs of observations to mark as compressed"),
+				summary: z
+					.string()
+					.max(10000)
+					.describe(
+						"Structured summary of the observations (Request/Completed/Learned/Next Steps)",
+					),
+			},
+		},
+		async (args) => {
+			// Validate ownership of all observation IDs
+			if (!db.validateObservationIds(args.observation_ids)) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text" as const,
+							text: "One or more observation IDs not found or not owned by you.",
+						},
+					],
+				};
+			}
+
+			// Verify all observations belong to the same session (min 1 guaranteed by schema)
+			const [firstId] = args.observation_ids;
+			const firstObs = firstId ? db.getObservation(firstId) : undefined;
+			if (!firstObs) {
+				return {
+					isError: true,
+					content: [{ type: "text" as const, text: "Observation not found." }],
+				};
+			}
+
+			const sessionId = firstObs.session_id;
+			if (!validateObservationsBelongToSession(args.observation_ids, sessionId)) {
+				return {
+					isError: true,
+					content: [
+						{ type: "text" as const, text: "All observations must belong to the same session." },
+					],
+				};
+			}
+
+			const session = db.getSession(sessionId);
+			if (!session) {
+				return {
+					isError: true,
+					content: [{ type: "text" as const, text: "Session not found." }],
+				};
+			}
+
+			// Store summary as a session memory BEFORE marking observations,
+			// so a storeMemory failure doesn't leave observations orphaned as "compressed"
+			try {
+				await storeMemory({
+					summary: args.summary,
+					apiKeyId: session.api_key_id,
+					apiKeyLabel: "compression",
+					userId: apiKey.user_id,
+					gitRemote: session.project,
+					scope: "session",
+					metadata: { source: "client_compression", session_id: session.id },
+					force: true,
+				});
+			} catch (err) {
+				log.error("Failed to store compression memory: {error}", {
+					error: err instanceof Error ? err.message : String(err),
+				});
+				return {
+					isError: true,
+					content: [{ type: "text" as const, text: "Failed to store compression memory." }],
+				};
+			}
+
+			// Mark observations only after the memory is safely stored
+			const compressed = markObservationsByIds(args.observation_ids);
+
+			// Update session summary
+			updateSessionSummary(session.id, args.summary);
+
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify({ compressed, memory_stored: true }, null, 2),
 					},
 				],
 			};
@@ -780,6 +925,51 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 4. Give me a summary of what you did: how many memories before/after, what was removed/rewritten, and why.
 
 Be conservative — when in doubt, keep the memory. Only remove things you're confident are duplicates or clearly stale.`,
+						},
+					},
+				],
+			};
+		},
+	);
+
+	server.registerPrompt(
+		"compress_session",
+		{
+			title: "Compress Session",
+			description:
+				"Summarize accumulated observations for the current session. Reads uncompressed observations, writes a structured summary, and marks them as compressed.",
+			argsSchema: {
+				session_id: z.string().describe("The session ID to compress observations for"),
+			},
+		},
+		(args) => {
+			return {
+				messages: [
+					{
+						role: "user" as const,
+						content: {
+							type: "text" as const,
+							text: `Compress the uncompressed observations for session "${args.session_id}". Follow these steps:
+
+1. Call get_uncompressed_observations with session_id "${args.session_id}" to fetch the pending observations.
+
+2. Read through all observations and write a structured summary with these sections:
+
+## Request
+What the user asked to accomplish (1-2 sentences).
+
+## Completed
+What was actually done — name specific files, functions, patterns.
+
+## Learned
+Key decisions, constraints, or patterns discovered.
+
+## Next Steps
+Unfinished work or open questions.
+
+3. Call compress_observations with the observation IDs from step 1 and your summary from step 2.
+
+Be specific — this summary will restore context in future sessions.`,
 						},
 					},
 				],

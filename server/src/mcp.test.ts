@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { createObservation, createSession, getMemory } from "./db.js";
+import { createObservation, createSession, getMemory, setConfig } from "./db.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { setProvider } from "./embeddings.js";
 import { estimateTokens } from "./mcp.js";
@@ -777,6 +777,156 @@ describe("MCP server", () => {
 		});
 		const init = (await res.json()) as JsonRpcResponse;
 		expect(init.result?.capabilities?.prompts).toBeDefined();
+	});
+});
+
+describe("Client compression MCP tools", () => {
+	beforeEach(() => {
+		setProvider(mockProvider);
+		setStorageProvider(mockStorage);
+		mockEmbed.mockClear();
+		mockUpsert.mockClear();
+		mockSearch.mockReset();
+		mockSearch.mockImplementation(() => Promise.resolve([] as VectorSearchResult[]));
+	});
+
+	afterEach(() => {
+		setProvider(mockProvider);
+		setStorageProvider(null);
+	});
+
+	test("get_uncompressed_observations returns observations", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const { id: keyId, key: apiKey } = await createApiKeyWithId(app);
+
+		const sessId = createSession({
+			claudeSessionId: "compress-read",
+			apiKeyId: keyId,
+		});
+
+		createObservation({
+			sessionId: sessId,
+			event: "UserPromptSubmit",
+			content: "{}",
+			prompt: "Fix the bug",
+		});
+		createObservation({
+			sessionId: sessId,
+			event: "PostToolUse",
+			toolName: "Edit",
+			content: "{}",
+			toolInputSummary: "Edit src/auth.ts",
+		});
+
+		const data = await mcpCallTool(app, apiKey, "get_uncompressed_observations", {
+			session_id: sessId,
+		});
+
+		expect(data.result?.isError).toBeUndefined();
+		const text = data.result?.content?.[0]?.text;
+		const obs = JSON.parse(text ?? "[]") as Array<{ id: string; event: string; prompt?: string }>;
+		expect(obs).toHaveLength(2);
+		expect(obs[0]?.event).toBe("UserPromptSubmit");
+		expect(obs[0]?.prompt).toBe("Fix the bug");
+		expect(obs[1]?.event).toBe("PostToolUse");
+	});
+
+	test("get_uncompressed_observations returns empty for wrong session", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const apiKey = await createApiKey(app);
+
+		const data = await mcpCallTool(app, apiKey, "get_uncompressed_observations", {
+			session_id: "nonexistent-session",
+		});
+
+		expect(data.result?.isError).toBeUndefined();
+		expect(data.result?.content?.[0]?.text).toBe("No uncompressed observations found.");
+	});
+
+	test("compress_observations marks and stores", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const { id: keyId, key: apiKey } = await createApiKeyWithId(app);
+
+		const sessId = createSession({
+			claudeSessionId: "compress-write",
+			apiKeyId: keyId,
+			project: "test/repo",
+		});
+
+		const id1 = createObservation({ sessionId: sessId, event: "UserPromptSubmit", content: "{}" });
+		const id2 = createObservation({ sessionId: sessId, event: "PostToolUse", content: "{}" });
+
+		const data = await mcpCallTool(app, apiKey, "compress_observations", {
+			observation_ids: [id1, id2],
+			summary: "## Request\nFix auth bug\n\n## Completed\nPatched middleware",
+		});
+
+		expect(data.result?.isError).toBeUndefined();
+		const text = data.result?.content?.[0]?.text;
+		const result = JSON.parse(text ?? "{}") as { compressed: number; memory_stored: boolean };
+		expect(result.compressed).toBe(2);
+		expect(result.memory_stored).toBe(true);
+
+		// Observations should now be compressed — get_uncompressed should return empty
+		const readBack = await mcpCallTool(app, apiKey, "get_uncompressed_observations", {
+			session_id: sessId,
+		});
+		expect(readBack.result?.content?.[0]?.text).toBe("No uncompressed observations found.");
+	});
+
+	test("compress_observations rejects cross-session IDs", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+		const { id: keyId, key: apiKey } = await createApiKeyWithId(app);
+
+		const sess1 = createSession({ claudeSessionId: "cross-1", apiKeyId: keyId });
+		const sess2 = createSession({ claudeSessionId: "cross-2", apiKeyId: keyId });
+
+		const id1 = createObservation({ sessionId: sess1, event: "UserPromptSubmit", content: "{}" });
+		const id2 = createObservation({ sessionId: sess2, event: "UserPromptSubmit", content: "{}" });
+
+		const data = await mcpCallTool(app, apiKey, "compress_observations", {
+			observation_ids: [id1, id2],
+			summary: "Should fail",
+		});
+
+		expect(data.result?.isError).toBe(true);
+		expect(data.result?.content?.[0]?.text).toContain("same session");
+	});
+
+	test("compress_observations rejects other user's observations", async () => {
+		const app = createTestApp();
+		await setupAdmin(app);
+
+		// Create as admin
+		const adminToken = await getToken(app);
+		const { id: adminKeyId, key: adminApiKey } = await createApiKeyWithId(app);
+
+		const sessId = createSession({
+			claudeSessionId: "other-user-obs",
+			apiKeyId: adminKeyId,
+		});
+		const obsId = createObservation({
+			sessionId: sessId,
+			event: "UserPromptSubmit",
+			content: "{}",
+		});
+
+		// Create a different user
+		const userB = await createRegularUser(app, adminToken, "userB-compress", "password123");
+		const userBApiKey = await createApiKey(app, userB.token);
+
+		// User B tries to compress admin's observations
+		const data = await mcpCallTool(app, userBApiKey, "compress_observations", {
+			observation_ids: [obsId],
+			summary: "Stolen summary",
+		});
+
+		expect(data.result?.isError).toBe(true);
+		expect(data.result?.content?.[0]?.text).toContain("not found or not owned");
 	});
 });
 

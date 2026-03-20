@@ -2,15 +2,20 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import {
 	type SessionRow,
 	countObservations,
+	countUncompressedObservations,
 	createObservation,
 	createSession,
 	endSession,
 	findSession,
 	getSession,
 	getSessionForUser,
+	getUncompressedObservationsForUser,
 	listObservations,
+	markObservationsByIds,
 	setConfig,
 	updateSessionSummary,
+	validateObservationIds,
+	validateObservationsBelongToSession,
 } from "./db.js";
 import { createTestApp, getToken, setupAdmin } from "./test-helpers.js";
 
@@ -291,6 +296,165 @@ describe("Hook endpoints", () => {
 			assertSession(session);
 			const observations = listObservations(session.id);
 			expect(observations.length).toBe(3);
+		});
+
+		test("returns uncompressed_count in response", async () => {
+			setConfig("memory_mode", "full");
+
+			const res = await app.request("/hooks/observation", {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${apiKey}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					session_id: "sess-count",
+					event: "UserPromptSubmit",
+					prompt: "First prompt",
+				}),
+			});
+
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { uncompressed_count?: number };
+			expect(body.uncompressed_count).toBe(1);
+
+			// Second observation should increment
+			const res2 = await app.request("/hooks/observation", {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${apiKey}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					session_id: "sess-count",
+					event: "UserPromptSubmit",
+					prompt: "Second prompt",
+				}),
+			});
+
+			const body2 = (await res2.json()) as { uncompressed_count?: number };
+			expect(body2.uncompressed_count).toBe(2);
+		});
+	});
+
+	// --- Client compression DB functions ---
+
+	describe("Client compression DB functions", () => {
+		test("markObservationsByIds marks only specified IDs", async () => {
+			setConfig("memory_mode", "full");
+
+			const sessId = createSession({
+				claudeSessionId: "mark-ids-sess",
+				apiKeyId,
+			});
+
+			const id1 = createObservation({
+				sessionId: sessId,
+				event: "UserPromptSubmit",
+				content: "{}",
+			});
+			const id2 = createObservation({ sessionId: sessId, event: "PostToolUse", content: "{}" });
+			const id3 = createObservation({ sessionId: sessId, event: "PostToolUse", content: "{}" });
+
+			// Mark only id1 and id2
+			const changed = markObservationsByIds([id1, id2]);
+			expect(changed).toBe(2);
+
+			// id3 should still be uncompressed
+			expect(countUncompressedObservations(sessId)).toBe(1);
+
+			// Marking again should return 0 (already compressed)
+			expect(markObservationsByIds([id1])).toBe(0);
+		});
+
+		test("markObservationsByIds handles empty array", () => {
+			expect(markObservationsByIds([])).toBe(0);
+		});
+
+		test("getUncompressedObservationsForUser respects user scope", async () => {
+			setConfig("memory_mode", "full");
+
+			const sessId = createSession({
+				claudeSessionId: "uncompressed-scope",
+				apiKeyId,
+			});
+
+			createObservation({ sessionId: sessId, event: "UserPromptSubmit", content: "{}" });
+			createObservation({ sessionId: sessId, event: "PostToolUse", content: "{}" });
+
+			const { getApiKeyById } = await import("./db.js");
+			const key = getApiKeyById(apiKeyId);
+			if (!key) throw new Error("Expected key");
+
+			// Correct user should see observations
+			const obs = getUncompressedObservationsForUser(sessId, key.user_id);
+			expect(obs.length).toBe(2);
+
+			// Wrong user should see nothing
+			const empty = getUncompressedObservationsForUser(sessId, "wrong-user-id");
+			expect(empty.length).toBe(0);
+		});
+
+		test("getUncompressedObservationsForUser respects limit", async () => {
+			setConfig("memory_mode", "full");
+
+			const sessId = createSession({
+				claudeSessionId: "uncompressed-limit",
+				apiKeyId,
+			});
+
+			for (let i = 0; i < 5; i++) {
+				createObservation({ sessionId: sessId, event: "UserPromptSubmit", content: "{}" });
+			}
+
+			const { getApiKeyById } = await import("./db.js");
+			const key = getApiKeyById(apiKeyId);
+			if (!key) throw new Error("Expected key");
+
+			const limited = getUncompressedObservationsForUser(sessId, key.user_id, 3);
+			expect(limited.length).toBe(3);
+		});
+
+		test("validateObservationIds checks user ownership", async () => {
+			setConfig("memory_mode", "full");
+
+			const sessId = createSession({
+				claudeSessionId: "validate-owner",
+				apiKeyId,
+			});
+
+			const id1 = createObservation({
+				sessionId: sessId,
+				event: "UserPromptSubmit",
+				content: "{}",
+			});
+
+			const { getApiKeyById } = await import("./db.js");
+			const key = getApiKeyById(apiKeyId);
+			if (!key) throw new Error("Expected key");
+
+			expect(validateObservationIds([id1], key.user_id)).toBe(true);
+			expect(validateObservationIds([id1], "wrong-user")).toBe(false);
+			expect(validateObservationIds(["nonexistent-id"], key.user_id)).toBe(false);
+		});
+
+		test("validateObservationsBelongToSession checks session", async () => {
+			setConfig("memory_mode", "full");
+
+			const sess1 = createSession({ claudeSessionId: "belong-1", apiKeyId });
+			const sess2 = createSession({ claudeSessionId: "belong-2", apiKeyId });
+
+			const id1 = createObservation({ sessionId: sess1, event: "UserPromptSubmit", content: "{}" });
+			const id2 = createObservation({ sessionId: sess2, event: "UserPromptSubmit", content: "{}" });
+
+			// Same session should pass
+			expect(validateObservationsBelongToSession([id1], sess1)).toBe(true);
+
+			// Mixed sessions should fail
+			expect(validateObservationsBelongToSession([id1, id2], sess1)).toBe(false);
+
+			// Empty array should pass
+			expect(validateObservationsBelongToSession([], sess1)).toBe(true);
 		});
 	});
 

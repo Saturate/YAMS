@@ -63,6 +63,12 @@ Runs when an OpenCode session starts.
 
 Fires on every file edit. The plugin tracks edited file paths in memory and flushes the full list when the session ends. This is the key advantage over the Claude Code plugin — you get a complete edit history per session.
 
+### `tool.execute.after` / `message.updated`
+
+Observation streaming hooks. After each tool execution or user message, the plugin POSTs to `/hooks/observation` with the event details. The server returns an `uncompressed_count` — when it hits the batch threshold (default 20), the plugin injects a system prompt telling the LLM to run the `compress_session` prompt.
+
+This enables **client-side compression**: the LLM reads its accumulated observations via `get_uncompressed_observations`, writes a structured summary, and stores it via `compress_observations`. No server-side LLM needed. See [Compression modes](/docs/configuration#compression-modes).
+
 ### `session.deleted` / `session.error`
 
 Runs when a session ends normally or with an error. POSTs a summary to `/ingest` with:
@@ -88,6 +94,8 @@ The `files_edited` array is unique to this plugin — it lets you (or your AI as
 | Capability | MCP | Plugin |
 |---|---|---|
 | Search & remember | ✅ | ✅ |
+| Observation streaming | ❌ | ✅ |
+| Client-side compression | ❌ | ✅ |
 | Auto MCP registration | ❌ | ✅ |
 | Session auto-ingest | ❌ | ✅ |
 | Auto-start server | ❌ | ✅ |

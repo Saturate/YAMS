@@ -97,3 +97,66 @@ Returns the observation with:
 - `tool_input` — what was sent to the tool
 - `tool_response` — what the tool returned
 - `files_modified` — files touched by this observation
+
+---
+
+## get_uncompressed_observations
+
+Get uncompressed (not yet summarized) observations for a session. Used during client-side compression — the LLM reads these, writes a summary, then calls `compress_observations`.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `session_id` | string | Yes | The session ID to get observations for |
+| `limit` | integer (1–100) | No | Max observations to return. Default: 50 |
+
+### Response
+
+Returns an array of observations with:
+
+- `id` — observation ID (pass these to `compress_observations`)
+- `event` — event type (UserPromptSubmit, PostToolUse, Stop)
+- `tool_name` — which tool was called
+- `prompt` — the user's prompt (if captured)
+- `tool_input_summary` — short summary of tool input
+- `files_modified` — files touched by this observation
+- `created_at` — ISO timestamp
+
+---
+
+## compress_observations
+
+Mark observations as compressed and store their summary as a session memory. Called after `get_uncompressed_observations` + summarization.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `observation_ids` | string[] | Yes | IDs of observations to mark compressed (max 100) |
+| `summary` | string | Yes | Structured summary (max 10000 chars) |
+
+### Response
+
+```json
+{
+  "compressed": 15,
+  "memory_stored": true
+}
+```
+
+The summary should follow the standard HUSK format:
+
+```
+## Request
+What the user asked to accomplish.
+
+## Completed
+What was done — specific files, functions, patterns.
+
+## Learned
+Key decisions, constraints, or patterns.
+
+## Next Steps
+Unfinished work or open questions.
+```
