@@ -39,6 +39,8 @@ const NAV_ITEMS: NavItem[] = [
 	{ to: "/keys", label: "API Keys" },
 	{ to: "/memories", label: "Memories" },
 	{ to: "/sessions", label: "Sessions" },
+	{ to: "/graph", label: "Graph" },
+	{ to: "/timeline", label: "Timeline" },
 	{ to: "/users", label: "Users", adminOnly: true },
 	{ to: "/settings", label: "Settings" },
 ];

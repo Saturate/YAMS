@@ -190,6 +190,28 @@ export interface HooksConfigResponse {
 	hooks: Record<string, unknown>;
 }
 
+export interface GraphNode {
+	id: string;
+	summary: string;
+	scope: string;
+	project: string | null;
+	created_at: string;
+}
+
+export interface GraphEdge {
+	id: string;
+	source: string;
+	target: string;
+	edge_type: string;
+	metadata: Record<string, unknown> | null;
+	created_at: string;
+}
+
+export interface GraphResponse {
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+}
+
 export const api = {
 	setup(username: string, password: string) {
 		return request<SetupResponse>("/setup", {
@@ -376,5 +398,16 @@ export const api = {
 
 	getHooksConfig(keyId: string) {
 		return request<HooksConfigResponse>(`/api/keys/${encodeURIComponent(keyId)}/hooks-config`);
+	},
+
+	// --- Graph ---
+
+	getGraph(opts?: { project?: string; scope?: string; limit?: number }) {
+		const params = new URLSearchParams();
+		if (opts?.project) params.set("project", opts.project);
+		if (opts?.scope) params.set("scope", opts.scope);
+		if (opts?.limit) params.set("limit", String(opts.limit));
+		const qs = params.toString();
+		return request<GraphResponse>(`/api/graph${qs ? `?${qs}` : ""}`);
 	},
 };
