@@ -41,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
 	{ to: "/sessions", label: "Sessions" },
 	{ to: "/graph", label: "Graph" },
 	{ to: "/timeline", label: "Timeline" },
+	{ to: "/workspaces", label: "Workspaces" },
 	{ to: "/users", label: "Users", adminOnly: true },
 	{ to: "/settings", label: "Settings" },
 ];

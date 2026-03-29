@@ -11,6 +11,7 @@ import {
 	countObservations,
 	getRecentSessionSummaries,
 	getSessionFilesModified,
+	getUserSetting,
 	listObservations,
 	markObservationsByIds,
 	updateSessionSummary,
@@ -20,6 +21,7 @@ import { getProvider } from "./embeddings.js";
 import { EDGE_TYPES, getGraphProviderOrNull } from "./graph.js";
 import { StoreMemoryError, isDuplicate, storeMemory } from "./ingest.js";
 import { getStorageProvider } from "./storage.js";
+import { resolveWorkspace } from "./workspace.js";
 
 const log = getLogger(["husk", "mcp"]);
 
@@ -55,6 +57,8 @@ function parseFilesModified(raw: string | null): string[] | undefined {
 
 function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 	const db = new UserScope(apiKey.user_id);
+	const autoDetect = getUserSetting(apiKey.user_id, "workspace_auto_detect") !== "false";
+	const wsOpts = { userId: apiKey.user_id, autoDetect };
 	const server = new McpServer({
 		name: "husk",
 		version: "0.1.0",
@@ -67,8 +71,12 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 				"Search memories by semantic similarity. When max_tokens is set, returns the most relevant memories that fit within the token budget — no need to guess a limit. Cost: embedding call + DB read, no LLM.",
 			inputSchema: {
 				query: z.string().describe("The search query"),
-				scope: z.enum(["session", "project", "global"]).optional().describe("Filter by scope"),
+				scope: z
+					.enum(["session", "project", "workspace", "global"])
+					.optional()
+					.describe("Filter by scope"),
 				project: z.string().optional().describe("Filter by git remote / project"),
+				workspace: z.string().optional().describe("Filter by workspace name or ID"),
 				limit: z.number().int().min(1).max(50).optional().describe("Max results (default 10)"),
 				max_tokens: z
 					.number()
@@ -98,11 +106,26 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			}
 
 			try {
+				// Resolve workspace filter
+				let workspaceId: string | undefined;
+				if (args.workspace) {
+					const ws = resolveWorkspace(args.workspace, wsOpts);
+					workspaceId = ws?.id;
+				} else if (args.scope === "workspace" && args.project) {
+					const ws = resolveWorkspace(args.project, wsOpts);
+					workspaceId = ws?.id;
+				}
+
 				// When token-budgeted, fetch generously and trim client-side
 				const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
 				const results = await getStorageProvider().search(
 					vector,
-					{ git_remote: args.project, scope: args.scope, user_id: apiKey.user_id },
+					{
+						git_remote: args.project,
+						scope: args.scope,
+						user_id: apiKey.user_id,
+						workspace_id: workspaceId,
+					},
 					fetchLimit,
 				);
 
@@ -152,7 +175,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			inputSchema: {
 				content: z.string().describe("The content to remember"),
 				scope: z
-					.enum(["session", "project", "global"])
+					.enum(["session", "project", "workspace", "global"])
 					.optional()
 					.describe("Memory scope (default: session)"),
 				project: z.string().optional().describe("Git remote / project identifier"),
@@ -167,12 +190,19 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					.min(0)
 					.optional()
 					.describe(
-						"TTL in seconds. 0 or omitted = scope default (session: 30d, project: 90d, global: forever).",
+						"TTL in seconds. 0 or omitted = scope default (session: 30d, project/workspace: 90d, global: forever).",
 					),
 			},
 		},
 		async (args) => {
 			try {
+				// Resolve workspace when scope is "workspace"
+				let workspaceId: string | null = null;
+				if (args.scope === "workspace" && args.project) {
+					const ws = resolveWorkspace(args.project, wsOpts);
+					workspaceId = ws?.id ?? null;
+				}
+
 				const result = await storeMemory({
 					summary: args.content,
 					apiKeyId: apiKey.id,
@@ -183,6 +213,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					force: args.force,
 					replace: args.replace,
 					ttl: args.ttl,
+					workspaceId,
 				});
 
 				if (isDuplicate(result)) {
@@ -299,7 +330,10 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 				"List all memories, optionally filtered by project and/or scope. Returns full memory objects with IDs. Use for auditing, cleanup, or bulk review. Cost: DB read only, no LLM.",
 			inputSchema: {
 				project: z.string().optional().describe("Filter by git remote / project"),
-				scope: z.enum(["session", "project", "global"]).optional().describe("Filter by scope"),
+				scope: z
+					.enum(["session", "project", "workspace", "global"])
+					.optional()
+					.describe("Filter by scope"),
 				limit: z.number().int().min(1).max(200).optional().describe("Max results (default 50)"),
 				offset: z.number().int().min(0).optional().describe("Pagination offset (default 0)"),
 			},
@@ -891,7 +925,10 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 				"Review and clean up your memories for a project or scope. Finds duplicates, contradictions, stale info, and overly verbose memories — then consolidates them.",
 			argsSchema: {
 				project: z.string().optional().describe("Git remote / project to focus on"),
-				scope: z.enum(["session", "project", "global"]).optional().describe("Scope to review"),
+				scope: z
+					.enum(["session", "project", "workspace", "global"])
+					.optional()
+					.describe("Scope to review"),
 			},
 		},
 		(args) => {

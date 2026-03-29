@@ -128,6 +128,23 @@ export interface StatsResponse {
 	keys: { total: number; active: number };
 	projects: number;
 	sessions: { total: number; active: number };
+	workspaces: number;
+}
+
+export interface Workspace {
+	id: string;
+	name: string;
+	created_by: string;
+	created_at: string;
+	project_count: number;
+}
+
+export interface WorkspaceDetail extends Workspace {
+	projects: string[];
+}
+
+export interface WorkspacesResponse {
+	workspaces: Workspace[];
 }
 
 export interface FiltersResponse {
@@ -409,5 +426,53 @@ export const api = {
 		if (opts?.limit) params.set("limit", String(opts.limit));
 		const qs = params.toString();
 		return request<GraphResponse>(`/api/graph${qs ? `?${qs}` : ""}`);
+	},
+
+	// --- Workspaces ---
+
+	listWorkspaces() {
+		return request<WorkspacesResponse>("/api/admin/workspaces");
+	},
+
+	createWorkspace(name: string) {
+		return request<{ id: string; name: string }>("/api/admin/workspaces", {
+			method: "POST",
+			body: JSON.stringify({ name }),
+		});
+	},
+
+	getWorkspace(id: string) {
+		return request<WorkspaceDetail>(`/api/admin/workspaces/${encodeURIComponent(id)}`);
+	},
+
+	updateWorkspace(id: string, name: string) {
+		return request<{ ok: true }>(`/api/admin/workspaces/${encodeURIComponent(id)}`, {
+			method: "PUT",
+			body: JSON.stringify({ name }),
+		});
+	},
+
+	deleteWorkspace(id: string) {
+		return request<{ id: string; deleted: true }>(
+			`/api/admin/workspaces/${encodeURIComponent(id)}`,
+			{ method: "DELETE" },
+		);
+	},
+
+	assignProjectToWorkspace(workspaceId: string, gitRemote: string) {
+		return request<{ workspace_id: string; git_remote: string }>(
+			`/api/admin/workspaces/${encodeURIComponent(workspaceId)}/projects`,
+			{
+				method: "POST",
+				body: JSON.stringify({ git_remote: gitRemote }),
+			},
+		);
+	},
+
+	removeProjectFromWorkspace(workspaceId: string, gitRemote: string) {
+		return request<{ git_remote: string; deleted: true }>(
+			`/api/admin/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(gitRemote)}`,
+			{ method: "DELETE" },
+		);
 	},
 };

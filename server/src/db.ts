@@ -175,6 +175,44 @@ export function initDb(path?: string): Database {
 	);
 
 	db.run(`
+		CREATE TABLE IF NOT EXISTS workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT UNIQUE NOT NULL,
+			created_by TEXT NOT NULL REFERENCES users(id),
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)
+	`);
+
+	db.run(`
+		CREATE TABLE IF NOT EXISTS workspace_projects (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+			git_remote TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (workspace_id, git_remote)
+		)
+	`);
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_workspace_projects_remote ON workspace_projects(git_remote)",
+	);
+
+	// Migration: add workspace_id to memories
+	if (!memCols.some((c) => c.name === "workspace_id")) {
+		db.run(
+			"ALTER TABLE memories ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL",
+		);
+	}
+	db.run("CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_id)");
+
+	db.run(`
+		CREATE TABLE IF NOT EXISTS user_settings (
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			key TEXT NOT NULL,
+			value TEXT NOT NULL,
+			PRIMARY KEY (user_id, key)
+		)
+	`);
+
+	db.run(`
 		CREATE TABLE IF NOT EXISTS graph_edges (
 			id TEXT PRIMARY KEY,
 			source_memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
@@ -358,6 +396,7 @@ export interface MemoryRow {
 	metadata: string | null;
 	created_at: string;
 	expires_at: string | null;
+	workspace_id: string | null;
 }
 
 export function createMemory(params: {
@@ -368,9 +407,10 @@ export function createMemory(params: {
 	summary: string;
 	metadata?: string | null;
 	expiresAt?: string | null;
+	workspaceId?: string | null;
 }): string {
 	db.query(
-		"INSERT INTO memories (id, api_key_id, git_remote, scope, summary, metadata, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO memories (id, api_key_id, git_remote, scope, summary, metadata, expires_at, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 	).run(
 		params.id,
 		params.apiKeyId,
@@ -379,6 +419,7 @@ export function createMemory(params: {
 		params.summary,
 		params.metadata ?? null,
 		params.expiresAt ?? null,
+		params.workspaceId ?? null,
 	);
 	return params.id;
 }
@@ -531,6 +572,151 @@ export function countMemories(opts?: {
 
 	const row = db.query<{ count: number }, string[]>(sql).get(...params);
 	return row?.count ?? 0;
+}
+
+// --- User Settings ---
+
+export function getUserSetting(userId: string, key: string): string | undefined {
+	const row = db
+		.query<{ value: string }, [string, string]>(
+			"SELECT value FROM user_settings WHERE user_id = ? AND key = ?",
+		)
+		.get(userId, key);
+	return row?.value;
+}
+
+export function setUserSetting(userId: string, key: string, value: string): void {
+	db.query("INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)").run(
+		userId,
+		key,
+		value,
+	);
+}
+
+export function deleteUserSetting(userId: string, key: string): boolean {
+	const result = db
+		.query("DELETE FROM user_settings WHERE user_id = ? AND key = ?")
+		.run(userId, key);
+	return result.changes > 0;
+}
+
+// --- Workspaces ---
+
+export interface WorkspaceRow {
+	id: string;
+	name: string;
+	created_by: string;
+	created_at: string;
+}
+
+export function createWorkspace(name: string, createdBy: string): string {
+	const id = crypto.randomUUID();
+	db.query("INSERT INTO workspaces (id, name, created_by) VALUES (?, ?, ?)").run(
+		id,
+		name,
+		createdBy,
+	);
+	return id;
+}
+
+export function getWorkspace(id: string): WorkspaceRow | undefined {
+	return (
+		db.query<WorkspaceRow, [string]>("SELECT * FROM workspaces WHERE id = ?").get(id) ?? undefined
+	);
+}
+
+export function getWorkspaceByName(name: string, userId?: string): WorkspaceRow | undefined {
+	if (userId) {
+		return (
+			db
+				.query<WorkspaceRow, [string, string]>(
+					"SELECT * FROM workspaces WHERE name = ? AND created_by = ?",
+				)
+				.get(name, userId) ?? undefined
+		);
+	}
+	return (
+		db.query<WorkspaceRow, [string]>("SELECT * FROM workspaces WHERE name = ?").get(name) ??
+		undefined
+	);
+}
+
+export function listWorkspaces(userId?: string): WorkspaceRow[] {
+	if (userId) {
+		return db
+			.query<WorkspaceRow, [string]>(
+				"SELECT * FROM workspaces WHERE created_by = ? ORDER BY name ASC",
+			)
+			.all(userId);
+	}
+	return db.query<WorkspaceRow, []>("SELECT * FROM workspaces ORDER BY name ASC").all();
+}
+
+export function updateWorkspace(id: string, name: string): boolean {
+	const result = db.query("UPDATE workspaces SET name = ? WHERE id = ?").run(name, id);
+	return result.changes > 0;
+}
+
+export function deleteWorkspace(id: string): boolean {
+	const result = db.query("DELETE FROM workspaces WHERE id = ?").run(id);
+	return result.changes > 0;
+}
+
+export function countWorkspaces(): number {
+	const row = db.query<{ count: number }, []>("SELECT COUNT(*) as count FROM workspaces").get();
+	return row?.count ?? 0;
+}
+
+export function assignProjectToWorkspace(workspaceId: string, gitRemote: string): void {
+	db.query(
+		"INSERT OR REPLACE INTO workspace_projects (workspace_id, git_remote) VALUES (?, ?)",
+	).run(workspaceId, gitRemote);
+}
+
+export function removeProjectFromWorkspace(gitRemote: string): boolean {
+	const result = db.query("DELETE FROM workspace_projects WHERE git_remote = ?").run(gitRemote);
+	return result.changes > 0;
+}
+
+export function listWorkspaceProjects(workspaceId: string): string[] {
+	const rows = db
+		.query<{ git_remote: string }, [string]>(
+			"SELECT git_remote FROM workspace_projects WHERE workspace_id = ? ORDER BY git_remote",
+		)
+		.all(workspaceId);
+	return rows.map((r) => r.git_remote);
+}
+
+export function getWorkspaceForUser(id: string, userId: string): WorkspaceRow | undefined {
+	return (
+		db
+			.query<WorkspaceRow, [string, string]>(
+				"SELECT * FROM workspaces WHERE id = ? AND created_by = ?",
+			)
+			.get(id, userId) ?? undefined
+	);
+}
+
+export function getWorkspaceForProject(
+	gitRemote: string,
+	userId?: string,
+): WorkspaceRow | undefined {
+	if (userId) {
+		return (
+			db
+				.query<WorkspaceRow, [string, string]>(
+					"SELECT w.* FROM workspaces w JOIN workspace_projects wp ON w.id = wp.workspace_id WHERE wp.git_remote = ? AND w.created_by = ?",
+				)
+				.get(gitRemote, userId) ?? undefined
+		);
+	}
+	return (
+		db
+			.query<WorkspaceRow, [string]>(
+				"SELECT w.* FROM workspaces w JOIN workspace_projects wp ON w.id = wp.workspace_id WHERE wp.git_remote = ?",
+			)
+			.get(gitRemote) ?? undefined
+	);
 }
 
 // --- Invites ---
@@ -1085,5 +1271,11 @@ export class UserScope {
 
 	validateObservationIds(ids: string[]): boolean {
 		return validateObservationIds(ids, this.userId);
+	}
+
+	// --- Workspaces ---
+
+	resolveWorkspaceForRemote(gitRemote: string): WorkspaceRow | undefined {
+		return getWorkspaceForProject(gitRemote, this.userId);
 	}
 }
