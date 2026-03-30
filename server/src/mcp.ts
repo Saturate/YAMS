@@ -115,37 +115,86 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 						getWorkspaceForUser(args.workspace, apiKey.user_id) ??
 						getWorkspaceByName(args.workspace, apiKey.user_id);
 					workspaceId = ws?.id;
-				} else if (args.scope === "workspace" && args.project) {
+				} else if (args.project) {
 					const ws = resolveWorkspace(args.project, wsOpts);
 					workspaceId = ws?.id;
 				}
 
-				// When token-budgeted, fetch generously and trim client-side
-				const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
-				const results = await getStorageProvider().search(
-					vector,
-					{
-						git_remote: args.project,
-						scope: args.scope,
-						user_id: apiKey.user_id,
-						workspace_id: workspaceId,
-					},
-					fetchLimit,
-				);
-
 				const now = new Date().toISOString();
-				let memories = results
-					.filter((r) => {
+				const filterExpired = (results: { score: number; payload: Record<string, unknown> }[]) =>
+					results.filter((r) => {
 						const expiresAt = r.payload?.expires_at;
 						return !expiresAt || String(expiresAt) > now;
-					})
-					.map((r) => ({
+					});
+
+				let memories: Record<string, unknown>[];
+
+				// Hierarchical search: when no scope filter and token-budgeted,
+				// walk up session → project → workspace → global filling the budget
+				if (!args.scope && args.max_tokens && args.project) {
+					const seen = new Set<string>();
+					const allResults: { score: number; payload: Record<string, unknown>; tier: number }[] =
+						[];
+
+					const tiers: { scope: string; workspace_id?: string }[] = [
+						{ scope: "session" },
+						{ scope: "project" },
+					];
+					if (workspaceId) {
+						tiers.push({ scope: "workspace", workspace_id: workspaceId });
+					}
+					tiers.push({ scope: "global" });
+
+					let tierIndex = 0;
+					for (const tier of tiers) {
+						const results = await getStorageProvider().search(
+							vector,
+							{
+								git_remote: tier.scope !== "global" ? args.project : undefined,
+								scope: tier.scope,
+								user_id: apiKey.user_id,
+								workspace_id: tier.workspace_id,
+							},
+							20,
+						);
+						for (const r of filterExpired(results)) {
+							const id = String(r.payload.memory_id ?? r.payload.id ?? "");
+							if (id && seen.has(id)) continue;
+							if (id) seen.add(id);
+							allResults.push({ ...r, tier: tierIndex });
+						}
+						tierIndex++;
+					}
+
+					// Sort by tier first (priority), then by score within tier
+					allResults.sort((a, b) => a.tier - b.tier || b.score - a.score);
+
+					memories = fitTokenBudget(
+						allResults.map((r) => ({ score: r.score, ...r.payload })),
+						args.max_tokens,
+					);
+				} else {
+					// Single-scope search (original behavior)
+					const fetchLimit = args.max_tokens ? 50 : (args.limit ?? 10);
+					const results = await getStorageProvider().search(
+						vector,
+						{
+							git_remote: args.project,
+							scope: args.scope,
+							user_id: apiKey.user_id,
+							workspace_id: args.scope === "workspace" ? workspaceId : undefined,
+						},
+						fetchLimit,
+					);
+
+					memories = filterExpired(results).map((r) => ({
 						score: r.score,
 						...(r.payload ?? {}),
 					}));
 
-				if (args.max_tokens) {
-					memories = fitTokenBudget(memories, args.max_tokens);
+					if (args.max_tokens) {
+						memories = fitTokenBudget(memories, args.max_tokens);
+					}
 				}
 
 				return {

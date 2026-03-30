@@ -5,11 +5,13 @@ import {
 	getConfigWithEnv,
 	getMemory,
 	getMemoryForUser,
+	getUserSetting,
 	updateMemorySummary,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import type { AppEnv } from "./env.js";
 import { getStorageProvider } from "./storage.js";
+import { resolveWorkspace } from "./workspace.js";
 
 const VALID_SCOPES = ["session", "project", "workspace", "global"] as const;
 type Scope = (typeof VALID_SCOPES)[number];
@@ -268,6 +270,17 @@ ingest.post("/", async (c) => {
 
 	const apiKey = c.get("apiKey");
 
+	// Resolve workspace for workspace-scoped memories
+	let workspaceId: string | null = null;
+	if (body.scope === "workspace" && body.git_remote) {
+		const autoDetect = getUserSetting(apiKey.user_id, "workspace_auto_detect") !== "false";
+		const ws = resolveWorkspace(body.git_remote, {
+			userId: apiKey.user_id,
+			autoDetect,
+		});
+		workspaceId = ws?.id ?? null;
+	}
+
 	try {
 		const result = await storeMemory({
 			summary,
@@ -280,6 +293,7 @@ ingest.post("/", async (c) => {
 			force: body.force,
 			replace: body.replace,
 			ttl: body.ttl,
+			workspaceId,
 		});
 
 		if (isDuplicate(result)) {
