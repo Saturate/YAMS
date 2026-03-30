@@ -9,9 +9,9 @@ Every memory has a scope that determines its visibility and default lifetime:
 
 | Scope | What it's for | Default TTL |
 |---|---|---|
-| `session` | Single coding session — what you just did, decisions made, blockers hit | 30 days |
-| `project` | Per-repo knowledge — API quirks, architecture decisions, team conventions | 90 days |
-| `workspace` | Shared across related repos — org-wide standards, client-specific patterns | 90 days |
+| `session` | Single coding session — what you just did, decisions made, blockers hit | 90 days |
+| `project` | Per-repo knowledge — API quirks, architecture decisions, team conventions | Forever |
+| `workspace` | Shared across related repos — org-wide standards, client-specific patterns | Forever |
 | `global` | Cross-project patterns — personal preferences, tool configs, workflow habits | Forever |
 
 ## Project keying

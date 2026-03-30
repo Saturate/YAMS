@@ -243,7 +243,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					.min(0)
 					.optional()
 					.describe(
-						"TTL in seconds. 0 or omitted = scope default (session: 30d, project/workspace: 90d, global: forever).",
+						"TTL in seconds. 0 or omitted = scope default (session: 90d, all others: forever). Admin can set HUSK_TTL_MAX to cap all TTLs.",
 					),
 			},
 		},

@@ -69,14 +69,13 @@ describe("resolveExpiresAt", () => {
 		setupTestDb();
 	});
 
-	test("session scope defaults to 30 days", () => {
+	test("session scope defaults to 90 days", () => {
 		const result = resolveExpiresAt(undefined, "session");
-		expectExpiresNear(result, 30 * 24 * 60 * 60);
+		expectExpiresNear(result, 90 * 24 * 60 * 60);
 	});
 
-	test("project scope defaults to 90 days", () => {
-		const result = resolveExpiresAt(undefined, "project");
-		expectExpiresNear(result, 90 * 24 * 60 * 60);
+	test("project scope defaults to forever", () => {
+		expect(resolveExpiresAt(undefined, "project")).toBeNull();
 	});
 
 	test("global scope defaults to forever", () => {
@@ -112,7 +111,7 @@ describe("resolveExpiresAt", () => {
 	});
 
 	test("0 means use scope default", () => {
-		expectExpiresNear(resolveExpiresAt(0, "session"), 30 * 24 * 60 * 60);
+		expectExpiresNear(resolveExpiresAt(0, "session"), 90 * 24 * 60 * 60);
 	});
 });
 
