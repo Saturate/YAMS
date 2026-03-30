@@ -31,9 +31,9 @@ function getDedupThreshold(): number {
 }
 
 const TTL_DEFAULTS: Record<string, string | undefined> = {
-	session: "2592000",
-	project: "7776000",
-	workspace: "7776000",
+	session: "7776000",
+	project: undefined,
+	workspace: undefined,
 	global: undefined,
 };
 
