@@ -5,13 +5,15 @@ import {
 	getConfigWithEnv,
 	getMemory,
 	getMemoryForUser,
+	getUserSetting,
 	updateMemorySummary,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import type { AppEnv } from "./env.js";
 import { getStorageProvider } from "./storage.js";
+import { resolveWorkspace } from "./workspace.js";
 
-const VALID_SCOPES = ["session", "project", "global"] as const;
+const VALID_SCOPES = ["session", "project", "workspace", "global"] as const;
 type Scope = (typeof VALID_SCOPES)[number];
 
 function isValidScope(scope: string): scope is Scope {
@@ -31,6 +33,7 @@ function getDedupThreshold(): number {
 const TTL_DEFAULTS: Record<string, string | undefined> = {
 	session: "2592000",
 	project: "7776000",
+	workspace: "7776000",
 	global: undefined,
 };
 
@@ -84,6 +87,7 @@ interface StoreMemoryParams {
 	force?: boolean;
 	replace?: string;
 	ttl?: number | null;
+	workspaceId?: string | null;
 }
 
 interface StoredMemory {
@@ -122,6 +126,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 	const gitRemote = params.gitRemote?.trim() || null;
 	const metadata = params.metadata ? JSON.stringify(params.metadata) : null;
 	const expiresAt = resolveExpiresAt(params.ttl, scope);
+	const workspaceId = params.workspaceId ?? null;
 
 	let vector: number[];
 	try {
@@ -149,6 +154,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 				api_key_label: params.apiKeyLabel,
 				created_at: existing.created_at,
 				expires_at: expiresAt,
+				workspace_id: workspaceId,
 			});
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
@@ -197,6 +203,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 		summary: params.summary,
 		metadata,
 		expiresAt,
+		workspaceId,
 	});
 
 	try {
@@ -208,6 +215,7 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 			api_key_label: params.apiKeyLabel,
 			created_at: createdAt,
 			expires_at: expiresAt,
+			workspace_id: workspaceId,
 		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : "Unknown error";
@@ -262,6 +270,17 @@ ingest.post("/", async (c) => {
 
 	const apiKey = c.get("apiKey");
 
+	// Resolve workspace for workspace-scoped memories
+	let workspaceId: string | null = null;
+	if (body.scope === "workspace" && body.git_remote) {
+		const autoDetect = getUserSetting(apiKey.user_id, "workspace_auto_detect") !== "false";
+		const ws = resolveWorkspace(body.git_remote, {
+			userId: apiKey.user_id,
+			autoDetect,
+		});
+		workspaceId = ws?.id ?? null;
+	}
+
 	try {
 		const result = await storeMemory({
 			summary,
@@ -274,6 +293,7 @@ ingest.post("/", async (c) => {
 			force: body.force,
 			replace: body.replace,
 			ttl: body.ttl,
+			workspaceId,
 		});
 
 		if (isDuplicate(result)) {

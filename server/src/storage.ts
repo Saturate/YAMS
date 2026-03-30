@@ -19,6 +19,7 @@ export interface MemoryFilter {
 	git_remote?: string;
 	scope?: string;
 	user_id?: string;
+	workspace_id?: string;
 }
 
 export interface VectorSearchResult {

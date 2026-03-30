@@ -14,8 +14,9 @@ Search memories by semantic similarity. Returns the most relevant memories for a
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query` | string | Yes | The search query |
-| `scope` | `"session"` \| `"project"` \| `"global"` | No | Filter by scope |
+| `scope` | `"session"` \| `"project"` \| `"workspace"` \| `"global"` | No | Filter by scope |
 | `project` | string | No | Filter by git remote / project |
+| `workspace` | string | No | Filter by workspace name or ID |
 | `limit` | integer (1–50) | No | Max results. Default: 10 |
 | `max_tokens` | integer (1–100,000) | No | Token budget — returns memories until budget is exhausted. Overrides `limit`. |
 
@@ -48,7 +49,7 @@ Store a new memory. Checks for duplicates automatically — if a similar memory 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `content` | string | Yes | The content to remember |
-| `scope` | `"session"` \| `"project"` \| `"global"` | No | Memory scope. Default: `"session"` |
+| `scope` | `"session"` \| `"project"` \| `"workspace"` \| `"global"` | No | Memory scope. Default: `"session"` |
 | `project` | string | No | Git remote / project identifier |
 | `force` | boolean | No | Skip duplicate check and store anyway |
 | `replace` | string | No | ID of an existing memory to overwrite |
@@ -66,6 +67,7 @@ Use `force: true` to skip this check, or `replace: "id"` to explicitly overwrite
 |---|---|
 | `session` | 30 days (2,592,000s) |
 | `project` | 90 days (7,776,000s) |
+| `workspace` | 90 days (7,776,000s) |
 | `global` | Forever |
 
 ### Example
@@ -113,7 +115,7 @@ List all memories with optional filters. Returns full memory objects including I
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `project` | string | No | Filter by git remote / project |
-| `scope` | `"session"` \| `"project"` \| `"global"` | No | Filter by scope |
+| `scope` | `"session"` \| `"project"` \| `"workspace"` \| `"global"` | No | Filter by scope |
 | `limit` | integer (1–200) | No | Max results. Default: 50 |
 | `offset` | integer | No | Pagination offset. Default: 0 |
 

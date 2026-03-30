@@ -198,6 +198,7 @@ export class SqliteVecStorageProvider implements StorageProvider {
 				if (filter.user_id && entry.payload.user_id !== filter.user_id) continue;
 				if (filter.git_remote && entry.payload.git_remote !== filter.git_remote) continue;
 				if (filter.scope && entry.payload.scope !== filter.scope) continue;
+				if (filter.workspace_id && entry.payload.workspace_id !== filter.workspace_id) continue;
 			}
 
 			results.push({

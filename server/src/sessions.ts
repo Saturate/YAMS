@@ -10,10 +10,13 @@ import {
 	getConfig,
 	getConfigWithEnv,
 	getRecentSessionSummaries,
+	getUserSetting,
+	listWorkspaceProjects,
 } from "./db.js";
 import type { AppEnv } from "./env.js";
 import { bus } from "./events.js";
 import { applyPrivacyFilters } from "./privacy.js";
+import { resolveWorkspace } from "./workspace.js";
 
 const log = getLogger(["husk", "sessions"]);
 
@@ -130,6 +133,36 @@ sessions.post("/session-start", async (c) => {
 		project,
 		limit: contextCount,
 	});
+
+	// Include sessions from sibling projects in the same workspace
+	const autoDetect = getUserSetting(apiKey.user_id, "workspace_auto_detect") !== "false";
+	const workspace = project
+		? resolveWorkspace(project, { userId: apiKey.user_id, autoDetect })
+		: undefined;
+
+	const siblingSessionIds = new Set(recentSessions.map((s) => s.id));
+	if (workspace) {
+		const siblingProjects = listWorkspaceProjects(workspace.id).filter((p) => p !== project);
+		for (const siblingProject of siblingProjects) {
+			const siblingSessions = getRecentSessionSummaries({
+				userId: apiKey.user_id,
+				project: siblingProject,
+				limit: 3,
+			});
+			for (const s of siblingSessions) {
+				if (!siblingSessionIds.has(s.id)) {
+					recentSessions.push(s);
+					siblingSessionIds.add(s.id);
+				}
+			}
+		}
+		// Re-sort by date after merging
+		recentSessions.sort(
+			(a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+		);
+		// Trim to context count
+		recentSessions.splice(contextCount);
+	}
 
 	if (recentSessions.length === 0) {
 		return c.json({}, 200);

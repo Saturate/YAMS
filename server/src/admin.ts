@@ -4,22 +4,35 @@ import { jwtMiddleware } from "./auth.js";
 import { parseSummary, setCompressionProvider } from "./compression.js";
 import {
 	UserScope,
+	assignProjectToWorkspace,
 	countMemories,
 	countObservations,
 	countSessions,
+	countWorkspaces,
+	createWorkspace,
 	deleteConfig,
 	deleteMemory,
 	deleteSession,
+	deleteWorkspace,
 	getConfig,
 	getMemory,
 	getSession,
+	getUserSetting,
+	getWorkspace,
+	getWorkspaceForProject,
+	getWorkspaceForUser,
 	listApiKeys,
 	listDistinctGitRemotes,
 	listDistinctScopes,
 	listMemories,
 	listObservations,
 	listSessions,
+	listWorkspaceProjects,
+	listWorkspaces,
+	removeProjectFromWorkspace,
 	setConfig,
+	setUserSetting,
+	updateWorkspace,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import type { AppEnv } from "./env.js";
@@ -50,6 +63,7 @@ admin.get("/stats", (c) => {
 		keys: { total: keys.length, active: activeKeys },
 		projects: projects.length,
 		sessions: { total: totalSessions, active: activeSessions },
+		workspaces: countWorkspaces(),
 	});
 });
 
@@ -228,6 +242,7 @@ const CONFIG_KEYS = [
 	"dedup_threshold",
 	"ttl_default_session",
 	"ttl_default_project",
+	"ttl_default_workspace",
 	"ttl_default_global",
 	"ttl_max",
 ] as const;
@@ -337,6 +352,7 @@ admin.put("/settings", async (c) => {
 		if (
 			(key === "ttl_default_session" ||
 				key === "ttl_default_project" ||
+				key === "ttl_default_workspace" ||
 				key === "ttl_default_global" ||
 				key === "ttl_max") &&
 			value !== null
@@ -371,6 +387,142 @@ admin.put("/settings", async (c) => {
 		resetPrivacyCache();
 	}
 
+	return c.json({ ok: true });
+});
+
+// --- Workspaces ---
+
+const WORKSPACE_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}._-]{0,62}$/u;
+
+function validateWorkspaceName(name: string): string | null {
+	if (!WORKSPACE_NAME_RE.test(name)) {
+		return "Name must be 1-63 characters: letters, numbers, hyphens, underscores, dots. Must start with a letter or number.";
+	}
+	return null;
+}
+
+admin.get("/workspaces", (c) => {
+	const userId = c.get("userId");
+	const isAdmin = c.get("role") === "admin";
+	const workspaces = listWorkspaces(isAdmin ? undefined : userId);
+	return c.json({ workspaces });
+});
+
+admin.post("/workspaces", async (c) => {
+	const body = await c.req.json<{ name?: string }>();
+	const name = body.name?.trim();
+	if (!name) {
+		return c.json({ error: "Name is required." }, 400);
+	}
+	const nameError = validateWorkspaceName(name);
+	if (nameError) {
+		return c.json({ error: nameError }, 400);
+	}
+
+	try {
+		const id = createWorkspace(name, c.get("userId"));
+		return c.json({ id, name }, 201);
+	} catch {
+		return c.json({ error: "Workspace name already exists." }, 409);
+	}
+});
+
+admin.get("/workspaces/:id", (c) => {
+	const userId = c.get("userId");
+	const isAdmin = c.get("role") === "admin";
+	const ws = isAdmin
+		? getWorkspace(c.req.param("id"))
+		: getWorkspaceForUser(c.req.param("id"), userId);
+
+	if (!ws) return c.json({ error: "Not found." }, 404);
+
+	const projects = listWorkspaceProjects(ws.id);
+	return c.json({ ...ws, projects });
+});
+
+admin.put("/workspaces/:id", async (c) => {
+	const userId = c.get("userId");
+	const ws = getWorkspaceForUser(c.req.param("id"), userId);
+	if (!ws) return c.json({ error: "Not found." }, 404);
+
+	const body = await c.req.json<{ name?: string }>();
+	const name = body.name?.trim();
+	if (!name) {
+		return c.json({ error: "Name is required." }, 400);
+	}
+	const nameError = validateWorkspaceName(name);
+	if (nameError) {
+		return c.json({ error: nameError }, 400);
+	}
+
+	if (!updateWorkspace(ws.id, name, userId)) {
+		return c.json({ error: "Not found." }, 404);
+	}
+	return c.json({ ok: true });
+});
+
+admin.delete("/workspaces/:id", (c) => {
+	const userId = c.get("userId");
+	const ws = getWorkspaceForUser(c.req.param("id"), userId);
+	if (!ws) return c.json({ error: "Not found." }, 404);
+
+	const result = deleteWorkspace(ws.id);
+	return c.json({
+		id: ws.id,
+		deleted: true,
+		rescoped_memories: result.rescopedMemories,
+	});
+});
+
+admin.post("/workspaces/:id/projects", async (c) => {
+	const userId = c.get("userId");
+	const ws = getWorkspaceForUser(c.req.param("id"), userId);
+	if (!ws) return c.json({ error: "Not found." }, 404);
+
+	const body = await c.req.json<{ git_remote?: string }>();
+	const gitRemote = body.git_remote?.trim();
+	if (!gitRemote) {
+		return c.json({ error: "git_remote is required." }, 400);
+	}
+
+	const existing = getWorkspaceForProject(gitRemote);
+	if (existing && existing.created_by !== userId) {
+		return c.json({ error: "Project is assigned to another user's workspace." }, 409);
+	}
+
+	try {
+		assignProjectToWorkspace(ws.id, gitRemote);
+	} catch {
+		return c.json({ error: "Project is already assigned to a workspace." }, 409);
+	}
+	return c.json({ workspace_id: ws.id, git_remote: gitRemote }, 201);
+});
+
+admin.delete("/workspaces/:id/projects/:remote", (c) => {
+	const userId = c.get("userId");
+	const ws = getWorkspaceForUser(c.req.param("id"), userId);
+	if (!ws) return c.json({ error: "Not found." }, 404);
+
+	const remote = decodeURIComponent(c.req.param("remote"));
+	if (!removeProjectFromWorkspace(ws.id, remote)) {
+		return c.json({ error: "Not found." }, 404);
+	}
+	return c.json({ git_remote: remote, deleted: true });
+});
+
+// --- User Settings (workspace auto-detect) ---
+
+admin.get("/user-settings/workspace-auto-detect", (c) => {
+	const value = getUserSetting(c.get("userId"), "workspace_auto_detect");
+	return c.json({ enabled: value !== "false" });
+});
+
+admin.put("/user-settings/workspace-auto-detect", async (c) => {
+	const body = await c.req.json<{ enabled?: boolean }>();
+	if (typeof body.enabled !== "boolean") {
+		return c.json({ error: "enabled must be a boolean." }, 400);
+	}
+	setUserSetting(c.get("userId"), "workspace_auto_detect", String(body.enabled));
 	return c.json({ ok: true });
 });
 

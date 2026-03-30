@@ -12,6 +12,7 @@ import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { TimelinePage } from "@/pages/timeline";
 import { UsersPage } from "@/pages/users";
+import { WorkspacesPage } from "@/pages/workspaces";
 import { ThemeProvider } from "@/theme-context";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
@@ -53,6 +54,7 @@ export function App() {
 								<Route path="/sessions" element={<SessionsPage />} />
 								<Route path="/graph" element={<GraphPage />} />
 								<Route path="/timeline" element={<TimelinePage />} />
+								<Route path="/workspaces" element={<WorkspacesPage />} />
 								<Route path="/users" element={<UsersPage />} />
 								<Route path="/settings" element={<SettingsPage />} />
 							</Route>

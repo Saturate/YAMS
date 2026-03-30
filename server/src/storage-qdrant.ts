@@ -52,6 +52,9 @@ export class QdrantStorageProvider implements StorageProvider {
 		if (filter?.scope) {
 			must.push({ key: "scope", match: { value: filter.scope } });
 		}
+		if (filter?.workspace_id) {
+			must.push({ key: "workspace_id", match: { value: filter.workspace_id } });
+		}
 
 		const results = await client.search(COLLECTION_NAME, {
 			vector,
