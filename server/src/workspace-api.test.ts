@@ -66,6 +66,46 @@ describe("workspace API", () => {
 		expect(res.status).toBe(400);
 	});
 
+	test("allows unicode workspace names", async () => {
+		for (const name of ["ÆØÅ-projekt", "café", "über-team", "日本語"]) {
+			const res = await authed("/api/admin/workspaces", adminToken, {
+				method: "POST",
+				body: JSON.stringify({ name }),
+			});
+			expect(res.status).toBe(201);
+		}
+	});
+
+	test("allows hyphens, underscores, dots in names", async () => {
+		for (const name of ["my-workspace", "my_workspace", "my.workspace", "a1-b2_c3.d4"]) {
+			const res = await authed("/api/admin/workspaces", adminToken, {
+				method: "POST",
+				body: JSON.stringify({ name }),
+			});
+			expect(res.status).toBe(201);
+		}
+	});
+
+	test("rejects names starting with special characters", async () => {
+		for (const name of ["-starts-with-dash", ".starts-with-dot", "_starts-with-underscore"]) {
+			const res = await authed("/api/admin/workspaces", adminToken, {
+				method: "POST",
+				body: JSON.stringify({ name }),
+			});
+			expect(res.status).toBe(400);
+		}
+	});
+
+	test("rejects empty and whitespace-only names", async () => {
+		for (const name of ["", "   "]) {
+			const res = await authed("/api/admin/workspaces", adminToken, {
+				method: "POST",
+				body: JSON.stringify({ name }),
+			});
+			expect(res.status).toBe(400);
+		}
+	});
+
 	test("rejects duplicate workspace names for same user", async () => {
 		await authed("/api/admin/workspaces", adminToken, {
 			method: "POST",

@@ -392,7 +392,7 @@ admin.put("/settings", async (c) => {
 
 // --- Workspaces ---
 
-const WORKSPACE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/;
+const WORKSPACE_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}._-]{0,62}$/u;
 
 function validateWorkspaceName(name: string): string | null {
 	if (!WORKSPACE_NAME_RE.test(name)) {
