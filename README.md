@@ -65,13 +65,14 @@ The server is **client-agnostic**. `/ingest` is a universal write endpoint - any
 
 ## Memory scopes
 
-| Scope     | What                   | Example                                                                              |
-| --------- | ---------------------- | ------------------------------------------------------------------------------------ |
-| `session` | Single coding session  | "Migrated Stripe v2 to v3 - checkout and billing done, webhooks still need updating" |
-| `project` | Per-repo knowledge     | "Legacy API returns dates as DD/MM/YYYY, not ISO 8601 - parse with dayjs.utc()"     |
-| `global`  | Cross-project patterns | "Always use bun, not npm. Prefers biome over eslint+prettier"                        |
+| Scope       | What                        | Example                                                                              |
+| ----------- | --------------------------- | ------------------------------------------------------------------------------------ |
+| `session`   | Single coding session       | "Migrated Stripe v2 to v3 - checkout and billing done, webhooks still need updating" |
+| `project`   | Per-repo knowledge          | "Legacy API returns dates as DD/MM/YYYY, not ISO 8601 - parse with dayjs.utc()"     |
+| `workspace` | Shared across related repos | "All client-a repos use Postgres 15 with RLS policies"                               |
+| `global`    | Cross-project patterns      | "Always use bun, not npm. Prefers biome over eslint+prettier"                        |
 
-Projects are keyed by **git remote URL** - works across machines regardless of where the repo is checked out.
+Projects are keyed by **git remote URL** - works across machines regardless of where the repo is checked out. Workspaces group related projects so memories can be shared across repos in the same organization or client.
 
 ## Configuration
 

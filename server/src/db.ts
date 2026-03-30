@@ -177,11 +177,14 @@ export function initDb(path?: string): Database {
 	db.run(`
 		CREATE TABLE IF NOT EXISTS workspaces (
 			id TEXT PRIMARY KEY,
-			name TEXT UNIQUE NOT NULL,
+			name TEXT NOT NULL,
 			created_by TEXT NOT NULL REFERENCES users(id),
 			created_at TEXT NOT NULL DEFAULT (datetime('now'))
 		)
 	`);
+	db.run(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_name_user ON workspaces(name, created_by)",
+	);
 
 	db.run(`
 		CREATE TABLE IF NOT EXISTS workspace_projects (
@@ -318,6 +321,13 @@ export function deleteUser(id: string): boolean {
 		db.query("DELETE FROM api_keys WHERE user_id = ?").run(id);
 		// Delete invites created by this user
 		db.query("DELETE FROM invites WHERE created_by = ?").run(id);
+		// Delete workspace project assignments and workspaces
+		db.query(
+			"DELETE FROM workspace_projects WHERE workspace_id IN (SELECT id FROM workspaces WHERE created_by = ?)",
+		).run(id);
+		db.query("DELETE FROM workspaces WHERE created_by = ?").run(id);
+		// Delete user settings
+		db.query("DELETE FROM user_settings WHERE user_id = ?").run(id);
 		// Delete the user
 		const result = db.query("DELETE FROM users WHERE id = ?").run(id);
 		return result.changes > 0;
@@ -641,19 +651,27 @@ export function getWorkspaceByName(name: string, userId?: string): WorkspaceRow 
 	);
 }
 
-export function listWorkspaces(userId?: string): WorkspaceRow[] {
+export interface WorkspaceWithCount extends WorkspaceRow {
+	project_count: number;
+}
+
+export function listWorkspaces(userId?: string): WorkspaceWithCount[] {
+	const base =
+		"SELECT w.*, COUNT(wp.git_remote) as project_count FROM workspaces w LEFT JOIN workspace_projects wp ON w.id = wp.workspace_id";
 	if (userId) {
 		return db
-			.query<WorkspaceRow, [string]>(
-				"SELECT * FROM workspaces WHERE created_by = ? ORDER BY name ASC",
+			.query<WorkspaceWithCount, [string]>(
+				`${base} WHERE w.created_by = ? GROUP BY w.id ORDER BY w.name ASC`,
 			)
 			.all(userId);
 	}
-	return db.query<WorkspaceRow, []>("SELECT * FROM workspaces ORDER BY name ASC").all();
+	return db.query<WorkspaceWithCount, []>(`${base} GROUP BY w.id ORDER BY w.name ASC`).all();
 }
 
-export function updateWorkspace(id: string, name: string): boolean {
-	const result = db.query("UPDATE workspaces SET name = ? WHERE id = ?").run(name, id);
+export function updateWorkspace(id: string, name: string, userId: string): boolean {
+	const result = db
+		.query("UPDATE workspaces SET name = ? WHERE id = ? AND created_by = ?")
+		.run(name, id, userId);
 	return result.changes > 0;
 }
 
@@ -668,13 +686,16 @@ export function countWorkspaces(): number {
 }
 
 export function assignProjectToWorkspace(workspaceId: string, gitRemote: string): void {
-	db.query(
-		"INSERT OR REPLACE INTO workspace_projects (workspace_id, git_remote) VALUES (?, ?)",
-	).run(workspaceId, gitRemote);
+	db.query("INSERT INTO workspace_projects (workspace_id, git_remote) VALUES (?, ?)").run(
+		workspaceId,
+		gitRemote,
+	);
 }
 
-export function removeProjectFromWorkspace(gitRemote: string): boolean {
-	const result = db.query("DELETE FROM workspace_projects WHERE git_remote = ?").run(gitRemote);
+export function removeProjectFromWorkspace(workspaceId: string, gitRemote: string): boolean {
+	const result = db
+		.query("DELETE FROM workspace_projects WHERE workspace_id = ? AND git_remote = ?")
+		.run(workspaceId, gitRemote);
 	return result.changes > 0;
 }
 

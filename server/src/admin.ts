@@ -19,6 +19,7 @@ import {
 	getSession,
 	getUserSetting,
 	getWorkspace,
+	getWorkspaceForProject,
 	getWorkspaceForUser,
 	listApiKeys,
 	listDistinctGitRemotes,
@@ -404,11 +405,7 @@ admin.get("/workspaces", (c) => {
 	const userId = c.get("userId");
 	const isAdmin = c.get("role") === "admin";
 	const workspaces = listWorkspaces(isAdmin ? undefined : userId);
-	const result = workspaces.map((w) => ({
-		...w,
-		project_count: listWorkspaceProjects(w.id).length,
-	}));
-	return c.json({ workspaces: result });
+	return c.json({ workspaces });
 });
 
 admin.post("/workspaces", async (c) => {
@@ -458,7 +455,7 @@ admin.put("/workspaces/:id", async (c) => {
 		return c.json({ error: nameError }, 400);
 	}
 
-	if (!updateWorkspace(ws.id, name)) {
+	if (!updateWorkspace(ws.id, name, userId)) {
 		return c.json({ error: "Not found." }, 404);
 	}
 	return c.json({ ok: true });
@@ -484,7 +481,16 @@ admin.post("/workspaces/:id/projects", async (c) => {
 		return c.json({ error: "git_remote is required." }, 400);
 	}
 
-	assignProjectToWorkspace(ws.id, gitRemote);
+	const existing = getWorkspaceForProject(gitRemote);
+	if (existing && existing.created_by !== userId) {
+		return c.json({ error: "Project is assigned to another user's workspace." }, 409);
+	}
+
+	try {
+		assignProjectToWorkspace(ws.id, gitRemote);
+	} catch {
+		return c.json({ error: "Project is already assigned to a workspace." }, 409);
+	}
 	return c.json({ workspace_id: ws.id, git_remote: gitRemote }, 201);
 });
 
@@ -494,7 +500,7 @@ admin.delete("/workspaces/:id/projects/:remote", (c) => {
 	if (!ws) return c.json({ error: "Not found." }, 404);
 
 	const remote = decodeURIComponent(c.req.param("remote"));
-	if (!removeProjectFromWorkspace(remote)) {
+	if (!removeProjectFromWorkspace(ws.id, remote)) {
 		return c.json({ error: "Not found." }, 404);
 	}
 	return c.json({ git_remote: remote, deleted: true });

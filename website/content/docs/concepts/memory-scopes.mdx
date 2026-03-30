@@ -1,6 +1,6 @@
 ---
 title: Memory Scopes
-description: Session, project, and global scopes — how memories are organized and expire.
+description: Session, project, workspace, and global scopes — how memories are organized and expire.
 ---
 
 ## Scopes
@@ -11,6 +11,7 @@ Every memory has a scope that determines its visibility and default lifetime:
 |---|---|---|
 | `session` | Single coding session — what you just did, decisions made, blockers hit | 30 days |
 | `project` | Per-repo knowledge — API quirks, architecture decisions, team conventions | 90 days |
+| `workspace` | Shared across related repos — org-wide standards, client-specific patterns | 90 days |
 | `global` | Cross-project patterns — personal preferences, tool configs, workflow habits | Forever |
 
 ## Project keying
@@ -18,6 +19,15 @@ Every memory has a scope that determines its visibility and default lifetime:
 Projects are identified by **git remote URL**. This means the same project is recognized regardless of where the repo is checked out — different machines, different paths, same project.
 
 When storing a memory with `scope: "project"`, the `project` field should be the git remote (e.g. `git@github.com:Saturate/HUSK.git`). The Claude Code plugin handles this automatically.
+
+## Workspaces
+
+Workspaces group related projects so memories can be shared across repos. For example, a "client-a" workspace might contain all repos for that client — memories scoped to `workspace` are visible from any project in the group.
+
+- Create and manage workspaces in the admin UI under **Workspaces**
+- Assign projects (git remotes) to workspaces
+- Auto-detection can infer the workspace from the git remote's org name (e.g. `github.com/my-org/*` → workspace "my-org"), toggleable per user
+- Search walks up the hierarchy: session → project → workspace → global
 
 ## TTL and expiry
 

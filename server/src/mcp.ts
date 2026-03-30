@@ -12,6 +12,8 @@ import {
 	getRecentSessionSummaries,
 	getSessionFilesModified,
 	getUserSetting,
+	getWorkspaceByName,
+	getWorkspaceForUser,
 	listObservations,
 	markObservationsByIds,
 	updateSessionSummary,
@@ -109,7 +111,9 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 				// Resolve workspace filter
 				let workspaceId: string | undefined;
 				if (args.workspace) {
-					const ws = resolveWorkspace(args.workspace, wsOpts);
+					const ws =
+						getWorkspaceForUser(args.workspace, apiKey.user_id) ??
+						getWorkspaceByName(args.workspace, apiKey.user_id);
 					workspaceId = ws?.id;
 				} else if (args.scope === "workspace" && args.project) {
 					const ws = resolveWorkspace(args.project, wsOpts);
