@@ -95,8 +95,21 @@ export function WorkspacesPage() {
 		},
 	});
 
+	const autoDetectQuery = useQuery({
+		queryKey: ["workspace-auto-detect"],
+		queryFn: () => api.getWorkspaceAutoDetect(),
+	});
+
+	const autoDetectMutation = useMutation({
+		mutationFn: (enabled: boolean) => api.setWorkspaceAutoDetect(enabled),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["workspace-auto-detect"] });
+		},
+	});
+
 	const workspaces = workspacesQuery.data?.workspaces ?? [];
 	const projects = filtersQuery.data?.projects ?? [];
+	const autoDetectEnabled = autoDetectQuery.data?.enabled ?? true;
 
 	return (
 		<AppLayout>
@@ -139,6 +152,23 @@ export function WorkspacesPage() {
 						</DialogFooter>
 					</DialogContent>
 				</Dialog>
+			</div>
+
+			<div className="mb-6 flex items-center justify-between rounded-lg border bg-muted/50 px-4 py-3">
+				<div>
+					<p className="text-sm font-medium">Auto-detect workspaces</p>
+					<p className="text-xs text-muted-foreground">
+						Infer workspace from git remote org name (e.g. github.com/my-org/* → "my-org")
+					</p>
+				</div>
+				<Button
+					size="sm"
+					variant={autoDetectEnabled ? "default" : "outline"}
+					disabled={autoDetectMutation.isPending}
+					onClick={() => autoDetectMutation.mutate(!autoDetectEnabled)}
+				>
+					{autoDetectEnabled ? "Enabled" : "Disabled"}
+				</Button>
 			</div>
 
 			{workspacesQuery.isLoading ? (

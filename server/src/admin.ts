@@ -466,8 +466,12 @@ admin.delete("/workspaces/:id", (c) => {
 	const ws = getWorkspaceForUser(c.req.param("id"), userId);
 	if (!ws) return c.json({ error: "Not found." }, 404);
 
-	deleteWorkspace(ws.id);
-	return c.json({ id: ws.id, deleted: true });
+	const result = deleteWorkspace(ws.id);
+	return c.json({
+		id: ws.id,
+		deleted: true,
+		rescoped_memories: result.rescopedMemories,
+	});
 });
 
 admin.post("/workspaces/:id/projects", async (c) => {

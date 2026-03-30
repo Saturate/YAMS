@@ -116,6 +116,7 @@ export interface Memory {
 	summary: string;
 	metadata: string | null;
 	created_at: string;
+	workspace_id: string | null;
 }
 
 export interface MemoriesResponse {
@@ -474,5 +475,16 @@ export const api = {
 			`/api/admin/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(gitRemote)}`,
 			{ method: "DELETE" },
 		);
+	},
+
+	getWorkspaceAutoDetect() {
+		return request<{ enabled: boolean }>("/api/admin/user-settings/workspace-auto-detect");
+	},
+
+	setWorkspaceAutoDetect(enabled: boolean) {
+		return request<{ ok: true }>("/api/admin/user-settings/workspace-auto-detect", {
+			method: "PUT",
+			body: JSON.stringify({ enabled }),
+		});
 	},
 };

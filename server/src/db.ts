@@ -675,9 +675,22 @@ export function updateWorkspace(id: string, name: string, userId: string): boole
 	return result.changes > 0;
 }
 
-export function deleteWorkspace(id: string): boolean {
-	const result = db.query("DELETE FROM workspaces WHERE id = ?").run(id);
-	return result.changes > 0;
+/**
+ * Deletes a workspace, re-scoping any workspace-scoped memories to "project"
+ * so they remain findable. Returns the count of re-scoped memories.
+ */
+export function deleteWorkspace(id: string): { deleted: boolean; rescopedMemories: number } {
+	const txn = db.transaction(() => {
+		const rescoped = db
+			.query(
+				"UPDATE memories SET scope = 'project', workspace_id = NULL WHERE workspace_id = ? AND scope = 'workspace'",
+			)
+			.run(id);
+		db.query("UPDATE memories SET workspace_id = NULL WHERE workspace_id = ?").run(id);
+		const result = db.query("DELETE FROM workspaces WHERE id = ?").run(id);
+		return { deleted: result.changes > 0, rescopedMemories: rescoped.changes };
+	});
+	return txn();
 }
 
 export function countWorkspaces(): number {
