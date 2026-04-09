@@ -1,17 +1,24 @@
+import { getLogger } from "@logtape/logtape";
 import { Hono } from "hono";
 import { bearerKeyMiddleware } from "./auth.js";
+import { classifyMemory, slugify } from "./compression.js";
 import {
 	createMemory,
+	generateUniqueSlug,
 	getConfigWithEnv,
 	getMemory,
 	getMemoryForUser,
 	getUserSetting,
+	isValidMemoryType,
+	updateMemoryFields,
 	updateMemorySummary,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
 import type { AppEnv } from "./env.js";
 import { getStorageProvider } from "./storage.js";
 import { resolveWorkspace } from "./workspace.js";
+
+const log = getLogger(["husk", "ingest"]);
 
 const VALID_SCOPES = ["session", "project", "workspace", "global"] as const;
 type Scope = (typeof VALID_SCOPES)[number];
@@ -88,6 +95,9 @@ interface StoreMemoryParams {
 	replace?: string;
 	ttl?: number | null;
 	workspaceId?: string | null;
+	title?: string;
+	memoryType?: string;
+	path?: string;
 }
 
 interface StoredMemory {
@@ -97,6 +107,10 @@ interface StoredMemory {
 	git_remote: string | null;
 	created_at: string;
 	expires_at: string | null;
+	title: string | null;
+	slug: string | null;
+	memory_type: string | null;
+	path: string | null;
 }
 
 export interface DuplicateMemory {
@@ -143,7 +157,31 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 			throw new StoreMemoryError("Memory to replace not found.", "validation");
 		}
 
-		updateMemorySummary(params.replace, params.summary);
+		// Re-classify on replace
+		let classification: { title: string; slug: string; memory_type: string; path: string };
+		try {
+			classification = await classifyMemory(params.summary, scope, gitRemote, {
+				title: params.title,
+				memoryType: params.memoryType,
+				path: params.path,
+			});
+		} catch {
+			const fallbackTitle = params.title ?? params.summary.slice(0, 60);
+			classification = {
+				title: fallbackTitle,
+				slug: generateUniqueSlug(scope, gitRemote, slugify(fallbackTitle)),
+				memory_type: params.memoryType ?? "fact",
+				path: params.path ?? "",
+			};
+		}
+
+		updateMemoryFields(params.replace, {
+			summary: params.summary,
+			title: classification.title,
+			slug: classification.slug,
+			memoryType: classification.memory_type,
+			path: classification.path,
+		});
 
 		try {
 			await getStorageProvider().upsert(params.replace, vector, {
@@ -155,6 +193,9 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 				created_at: existing.created_at,
 				expires_at: expiresAt,
 				workspace_id: workspaceId,
+				title: classification.title,
+				memory_type: classification.memory_type,
+				path: classification.path,
 			});
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
@@ -168,6 +209,10 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 			git_remote: gitRemote,
 			created_at: existing.created_at,
 			expires_at: expiresAt,
+			title: classification.title,
+			slug: classification.slug,
+			memory_type: classification.memory_type,
+			path: classification.path,
 		};
 	}
 
@@ -192,6 +237,27 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 		}
 	}
 
+	// Auto-classify
+	let classification: { title: string; slug: string; memory_type: string; path: string };
+	try {
+		classification = await classifyMemory(params.summary, scope, gitRemote, {
+			title: params.title,
+			memoryType: params.memoryType,
+			path: params.path,
+		});
+	} catch (err) {
+		log.warn("Memory classification failed, using defaults: {error}", {
+			error: err instanceof Error ? err.message : String(err),
+		});
+		const fallbackTitle = params.title ?? params.summary.slice(0, 60);
+		classification = {
+			title: fallbackTitle,
+			slug: generateUniqueSlug(scope, gitRemote, slugify(fallbackTitle)),
+			memory_type: params.memoryType ?? "fact",
+			path: params.path ?? "",
+		};
+	}
+
 	const id = crypto.randomUUID();
 	const createdAt = new Date().toISOString();
 
@@ -204,6 +270,10 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 		metadata,
 		expiresAt,
 		workspaceId,
+		title: classification.title,
+		slug: classification.slug,
+		memoryType: classification.memory_type,
+		path: classification.path,
 	});
 
 	try {
@@ -216,6 +286,9 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 			created_at: createdAt,
 			expires_at: expiresAt,
 			workspace_id: workspaceId,
+			title: classification.title,
+			memory_type: classification.memory_type,
+			path: classification.path,
 		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : "Unknown error";
@@ -229,6 +302,10 @@ export async function storeMemory(params: StoreMemoryParams): Promise<StoreMemor
 		git_remote: gitRemote,
 		created_at: createdAt,
 		expires_at: expiresAt,
+		title: classification.title,
+		slug: classification.slug,
+		memory_type: classification.memory_type,
+		path: classification.path,
 	};
 }
 
@@ -251,6 +328,9 @@ interface IngestBody {
 	force?: boolean;
 	replace?: string;
 	ttl?: number | null;
+	title?: string;
+	memory_type?: string;
+	path?: string;
 }
 
 const ingest = new Hono<AppEnv>();
@@ -266,6 +346,15 @@ ingest.post("/", async (c) => {
 	}
 	if (summary.length > 10_000) {
 		return c.json({ error: "Summary must be 10,000 characters or fewer." }, 400);
+	}
+	if (body.memory_type && !isValidMemoryType(body.memory_type)) {
+		return c.json(
+			{
+				error:
+					"Invalid memory_type. Must be one of: decision, solution, lesson, fact, convention, goal.",
+			},
+			400,
+		);
 	}
 
 	const apiKey = c.get("apiKey");
@@ -294,6 +383,9 @@ ingest.post("/", async (c) => {
 			replace: body.replace,
 			ttl: body.ttl,
 			workspaceId,
+			title: body.title,
+			memoryType: body.memory_type,
+			path: body.path,
 		});
 
 		if (isDuplicate(result)) {

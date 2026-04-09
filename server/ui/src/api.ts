@@ -117,6 +117,12 @@ export interface Memory {
 	metadata: string | null;
 	created_at: string;
 	workspace_id: string | null;
+	title: string | null;
+	slug: string | null;
+	memory_type: string | null;
+	path: string | null;
+	updated_at: string | null;
+	deleted_at: string | null;
 }
 
 export interface MemoriesResponse {
@@ -151,6 +157,8 @@ export interface WorkspacesResponse {
 export interface FiltersResponse {
 	projects: string[];
 	scopes: string[];
+	types: string[];
+	paths: string[];
 }
 
 export interface SearchResult {
@@ -287,12 +295,18 @@ export const api = {
 	listMemories(opts?: {
 		git_remote?: string;
 		scope?: string;
+		memory_type?: string;
+		path?: string;
+		include_deleted?: boolean;
 		limit?: number;
 		offset?: number;
 	}) {
 		const params = new URLSearchParams();
 		if (opts?.git_remote) params.set("git_remote", opts.git_remote);
 		if (opts?.scope) params.set("scope", opts.scope);
+		if (opts?.memory_type) params.set("memory_type", opts.memory_type);
+		if (opts?.path) params.set("path", opts.path);
+		if (opts?.include_deleted) params.set("include_deleted", "true");
 		if (opts?.limit) params.set("limit", String(opts.limit));
 		if (opts?.offset) params.set("offset", String(opts.offset));
 		const qs = params.toString();
@@ -307,9 +321,17 @@ export const api = {
 	},
 
 	deleteMemory(id: string) {
-		return request<{ id: string; deleted: true }>(`/api/admin/memories/${encodeURIComponent(id)}`, {
-			method: "DELETE",
-		});
+		return request<{ id: string; soft_deleted: true }>(
+			`/api/admin/memories/${encodeURIComponent(id)}`,
+			{ method: "DELETE" },
+		);
+	},
+
+	restoreMemory(id: string) {
+		return request<{ id: string; restored: true }>(
+			`/api/admin/memories/${encodeURIComponent(id)}/restore`,
+			{ method: "POST" },
+		);
 	},
 
 	// --- Auth providers ---

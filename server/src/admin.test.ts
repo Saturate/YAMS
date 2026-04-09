@@ -203,8 +203,8 @@ describe("admin API", () => {
 			headers: { Authorization: `Bearer ${token}` },
 		});
 		expect(res.status).toBe(200);
-		const body = (await res.json()) as { id: string; deleted: boolean };
-		expect(body.deleted).toBe(true);
+		const body = (await res.json()) as { id: string; soft_deleted: boolean };
+		expect(body.soft_deleted).toBe(true);
 	});
 
 	test("DELETE /memories/:id returns 404 for missing", async () => {

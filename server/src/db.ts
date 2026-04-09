@@ -206,6 +206,27 @@ export function initDb(path?: string): Database {
 	}
 	db.run("CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace_id)");
 
+	// Migration: add structured memory columns (title, slug, memory_type, path, updated_at, deleted_at)
+	const memColNames = new Set(memCols.map((c) => c.name));
+	if (!memColNames.has("title")) {
+		db.run("ALTER TABLE memories ADD COLUMN title TEXT");
+		db.run("ALTER TABLE memories ADD COLUMN slug TEXT");
+		db.run("ALTER TABLE memories ADD COLUMN memory_type TEXT");
+		db.run("ALTER TABLE memories ADD COLUMN path TEXT");
+		db.run("ALTER TABLE memories ADD COLUMN updated_at TEXT");
+		db.run("ALTER TABLE memories ADD COLUMN deleted_at TEXT");
+	}
+	db.run(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_slug ON memories(scope, git_remote, slug) WHERE slug IS NOT NULL AND deleted_at IS NULL",
+	);
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type) WHERE memory_type IS NOT NULL",
+	);
+	db.run(
+		"CREATE INDEX IF NOT EXISTS idx_memories_deleted ON memories(deleted_at) WHERE deleted_at IS NOT NULL",
+	);
+	db.run("CREATE INDEX IF NOT EXISTS idx_memories_path ON memories(path) WHERE path IS NOT NULL");
+
 	db.run(`
 		CREATE TABLE IF NOT EXISTS user_settings (
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -397,6 +418,20 @@ export function updateKeyLastUsed(id: string) {
 
 // --- Memories ---
 
+export const MEMORY_TYPES = [
+	"decision",
+	"solution",
+	"lesson",
+	"fact",
+	"convention",
+	"goal",
+] as const;
+export type MemoryType = (typeof MEMORY_TYPES)[number];
+
+export function isValidMemoryType(value: string): value is MemoryType {
+	return MEMORY_TYPES.includes(value as MemoryType);
+}
+
 export interface MemoryRow {
 	id: string;
 	api_key_id: string;
@@ -407,6 +442,12 @@ export interface MemoryRow {
 	created_at: string;
 	expires_at: string | null;
 	workspace_id: string | null;
+	title: string | null;
+	slug: string | null;
+	memory_type: string | null;
+	path: string | null;
+	updated_at: string | null;
+	deleted_at: string | null;
 }
 
 export function createMemory(params: {
@@ -418,9 +459,14 @@ export function createMemory(params: {
 	metadata?: string | null;
 	expiresAt?: string | null;
 	workspaceId?: string | null;
+	title?: string | null;
+	slug?: string | null;
+	memoryType?: string | null;
+	path?: string | null;
 }): string {
 	db.query(
-		"INSERT INTO memories (id, api_key_id, git_remote, scope, summary, metadata, expires_at, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		`INSERT INTO memories (id, api_key_id, git_remote, scope, summary, metadata, expires_at, workspace_id, title, slug, memory_type, path)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	).run(
 		params.id,
 		params.apiKeyId,
@@ -430,11 +476,19 @@ export function createMemory(params: {
 		params.metadata ?? null,
 		params.expiresAt ?? null,
 		params.workspaceId ?? null,
+		params.title ?? null,
+		params.slug ?? null,
+		params.memoryType ?? null,
+		params.path ?? null,
 	);
 	return params.id;
 }
 
-const EXPIRY_FILTER = "(m.expires_at IS NULL OR m.expires_at > datetime('now'))";
+const ACTIVE_FILTER =
+	"(m.expires_at IS NULL OR m.expires_at > datetime('now')) AND m.deleted_at IS NULL";
+
+/** @deprecated Use ACTIVE_FILTER instead */
+const EXPIRY_FILTER = ACTIVE_FILTER;
 
 /** @internal System use only — user-facing code should use UserScope */
 export function getMemory(id: string): MemoryRow | undefined {
@@ -461,9 +515,19 @@ export function listMemories(opts?: {
 	limit?: number;
 	offset?: number;
 	userId?: string;
+	memoryType?: string;
+	path?: string;
+	includeDeleted?: boolean;
 }): MemoryRow[] {
-	const conditions: string[] = [EXPIRY_FILTER];
+	const conditions: string[] = [];
 	const params: (string | number)[] = [];
+
+	if (opts?.includeDeleted) {
+		// Only apply expiry filter, show deleted
+		conditions.push("(m.expires_at IS NULL OR m.expires_at > datetime('now'))");
+	} else {
+		conditions.push(ACTIVE_FILTER);
+	}
 
 	if (opts?.gitRemote) {
 		conditions.push("m.git_remote = ?");
@@ -476,6 +540,14 @@ export function listMemories(opts?: {
 	if (opts?.userId) {
 		conditions.push("ak.user_id = ?");
 		params.push(opts.userId);
+	}
+	if (opts?.memoryType) {
+		conditions.push("m.memory_type = ?");
+		params.push(opts.memoryType);
+	}
+	if (opts?.path) {
+		conditions.push("(m.path = ? OR m.path LIKE ?)");
+		params.push(opts.path, `${opts.path}%`);
 	}
 
 	const needsJoin = opts?.userId != null;
@@ -495,7 +567,93 @@ export function listMemories(opts?: {
 }
 
 export function updateMemorySummary(id: string, summary: string): void {
-	db.query("UPDATE memories SET summary = ? WHERE id = ?").run(summary, id);
+	db.query("UPDATE memories SET summary = ?, updated_at = datetime('now') WHERE id = ?").run(
+		summary,
+		id,
+	);
+}
+
+export function updateMemoryFields(
+	id: string,
+	fields: {
+		title?: string | null;
+		slug?: string | null;
+		memoryType?: string | null;
+		path?: string | null;
+		summary?: string;
+	},
+): void {
+	const sets: string[] = ["updated_at = datetime('now')"];
+	const params: (string | null)[] = [];
+
+	if (fields.title !== undefined) {
+		sets.push("title = ?");
+		params.push(fields.title);
+	}
+	if (fields.slug !== undefined) {
+		sets.push("slug = ?");
+		params.push(fields.slug);
+	}
+	if (fields.memoryType !== undefined) {
+		sets.push("memory_type = ?");
+		params.push(fields.memoryType);
+	}
+	if (fields.path !== undefined) {
+		sets.push("path = ?");
+		params.push(fields.path);
+	}
+	if (fields.summary !== undefined) {
+		sets.push("summary = ?");
+		params.push(fields.summary);
+	}
+
+	params.push(id);
+	db.query(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+}
+
+/** Soft-delete a memory by setting deleted_at. */
+export function softDeleteMemory(id: string): boolean {
+	const result = db
+		.query("UPDATE memories SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL")
+		.run(id);
+	return result.changes > 0;
+}
+
+/** Restore a soft-deleted memory. */
+export function restoreMemory(id: string): boolean {
+	const result = db
+		.query("UPDATE memories SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL")
+		.run(id);
+	return result.changes > 0;
+}
+
+/** Generate a unique slug within (scope, git_remote), appending -2, -3, etc. on collision. */
+export function generateUniqueSlug(
+	scope: string,
+	gitRemote: string | null,
+	baseSlug: string,
+): string {
+	let slug = baseSlug;
+	let suffix = 2;
+
+	const remoteCondition = gitRemote === null ? "git_remote IS NULL" : "git_remote = ?";
+	const sql = `SELECT COUNT(*) as count FROM memories WHERE scope = ? AND ${remoteCondition} AND slug = ? AND deleted_at IS NULL`;
+
+	if (gitRemote === null) {
+		const check = db.prepare<{ count: number }, [string, string]>(sql);
+		while ((check.get(scope, slug)?.count ?? 0) > 0) {
+			slug = `${baseSlug}-${suffix}`;
+			suffix++;
+		}
+	} else {
+		const check = db.prepare<{ count: number }, [string, string, string]>(sql);
+		while ((check.get(scope, gitRemote, slug)?.count ?? 0) > 0) {
+			slug = `${baseSlug}-${suffix}`;
+			suffix++;
+		}
+	}
+
+	return slug;
 }
 
 /** @internal System use only — user-facing code should use UserScope */
@@ -510,6 +668,16 @@ export function getExpiredMemoryIds(limit: number): string[] {
 			"SELECT id FROM memories WHERE expires_at IS NOT NULL AND expires_at < datetime('now') LIMIT ?",
 		)
 		.all(limit);
+	return rows.map((r) => r.id);
+}
+
+/** Find soft-deleted memories past the grace period for hard purge. */
+export function getSoftDeletedMemoryIds(graceDays: number, limit: number): string[] {
+	const rows = db
+		.query<{ id: string }, [string, number]>(
+			"SELECT id FROM memories WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', '-' || ? || ' days') LIMIT ?",
+		)
+		.all(String(graceDays), limit);
 	return rows.map((r) => r.id);
 }
 
@@ -552,13 +720,55 @@ export function listDistinctScopes(userId?: string): string[] {
 	return rows.map((r) => r.scope);
 }
 
+export function listDistinctMemoryTypes(userId?: string): string[] {
+	if (userId) {
+		const rows = db
+			.query<{ memory_type: string }, [string]>(
+				"SELECT DISTINCT m.memory_type FROM memories m JOIN api_keys ak ON m.api_key_id = ak.id WHERE m.memory_type IS NOT NULL AND m.deleted_at IS NULL AND ak.user_id = ? ORDER BY m.memory_type",
+			)
+			.all(userId);
+		return rows.map((r) => r.memory_type);
+	}
+	const rows = db
+		.query<{ memory_type: string }, []>(
+			"SELECT DISTINCT memory_type FROM memories WHERE memory_type IS NOT NULL AND deleted_at IS NULL ORDER BY memory_type",
+		)
+		.all();
+	return rows.map((r) => r.memory_type);
+}
+
+export function listDistinctPaths(userId?: string): string[] {
+	if (userId) {
+		const rows = db
+			.query<{ path: string }, [string]>(
+				"SELECT DISTINCT m.path FROM memories m JOIN api_keys ak ON m.api_key_id = ak.id WHERE m.path IS NOT NULL AND m.path != '' AND m.deleted_at IS NULL AND ak.user_id = ? ORDER BY m.path",
+			)
+			.all(userId);
+		return rows.map((r) => r.path);
+	}
+	const rows = db
+		.query<{ path: string }, []>(
+			"SELECT DISTINCT path FROM memories WHERE path IS NOT NULL AND path != '' AND deleted_at IS NULL ORDER BY path",
+		)
+		.all();
+	return rows.map((r) => r.path);
+}
+
 export function countMemories(opts?: {
 	gitRemote?: string;
 	scope?: string;
 	userId?: string;
+	memoryType?: string;
+	includeDeleted?: boolean;
 }): number {
-	const conditions: string[] = [EXPIRY_FILTER];
+	const conditions: string[] = [];
 	const params: string[] = [];
+
+	if (opts?.includeDeleted) {
+		conditions.push("(m.expires_at IS NULL OR m.expires_at > datetime('now'))");
+	} else {
+		conditions.push(ACTIVE_FILTER);
+	}
 
 	if (opts?.gitRemote) {
 		conditions.push("m.git_remote = ?");
@@ -571,6 +781,10 @@ export function countMemories(opts?: {
 	if (opts?.userId) {
 		conditions.push("ak.user_id = ?");
 		params.push(opts.userId);
+	}
+	if (opts?.memoryType) {
+		conditions.push("m.memory_type = ?");
+		params.push(opts.memoryType);
 	}
 
 	const needsJoin = opts?.userId != null;
@@ -1246,11 +1460,19 @@ export class UserScope {
 		scope?: string;
 		limit?: number;
 		offset?: number;
+		memoryType?: string;
+		path?: string;
+		includeDeleted?: boolean;
 	}): MemoryRow[] {
 		return listMemories({ ...opts, userId: this.userId });
 	}
 
-	countMemories(opts?: { gitRemote?: string; scope?: string }): number {
+	countMemories(opts?: {
+		gitRemote?: string;
+		scope?: string;
+		memoryType?: string;
+		includeDeleted?: boolean;
+	}): number {
 		return countMemories({ ...opts, userId: this.userId });
 	}
 
@@ -1258,6 +1480,23 @@ export class UserScope {
 		const memory = getMemoryForUser(id, this.userId);
 		if (!memory) return false;
 		return deleteMemory(id);
+	}
+
+	softDeleteMemory(id: string): boolean {
+		const memory = getMemoryForUser(id, this.userId);
+		if (!memory) return false;
+		return softDeleteMemory(id);
+	}
+
+	restoreMemory(id: string): boolean {
+		// For restore, check ownership even on deleted memories
+		const row = db
+			.query<MemoryRow, [string, string]>(
+				"SELECT m.* FROM memories m JOIN api_keys k ON m.api_key_id = k.id WHERE m.id = ? AND k.user_id = ? AND m.deleted_at IS NOT NULL",
+			)
+			.get(id, this.userId);
+		if (!row) return false;
+		return restoreMemory(id);
 	}
 
 	listGitRemotes(): string[] {
