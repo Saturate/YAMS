@@ -89,6 +89,8 @@ export function parseSummary(summary: string): ParsedSummary {
 
 export interface CompressionProvider {
 	summarize(observations: ObservationRow[], project: string | null): Promise<string>;
+	/** Generic completion for short classification tasks. */
+	complete(prompt: string, maxTokens: number): Promise<string>;
 	readonly name: string;
 }
 
@@ -118,11 +120,8 @@ class AnthropicProvider implements CompressionProvider {
 		);
 	}
 
-	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {
-		const observationText = formatObservations(observations, project);
-		const messages: AnthropicMessage[] = [
-			{ role: "user", content: `${COMPRESSION_PROMPT}\n\n${observationText}` },
-		];
+	private async call(content: string, maxTokens: number): Promise<string> {
+		const messages: AnthropicMessage[] = [{ role: "user", content }];
 
 		const res = await fetch("https://api.anthropic.com/v1/messages", {
 			method: "POST",
@@ -133,7 +132,7 @@ class AnthropicProvider implements CompressionProvider {
 			},
 			body: JSON.stringify({
 				model: this.model,
-				max_tokens: 800,
+				max_tokens: maxTokens,
 				messages,
 			}),
 			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -141,13 +140,22 @@ class AnthropicProvider implements CompressionProvider {
 
 		if (!res.ok) {
 			const body = await res.text();
-			throw new Error(`Anthropic compression failed (${res.status}): ${body}`);
+			throw new Error(`Anthropic call failed (${res.status}): ${body}`);
 		}
 
 		const data = (await res.json()) as AnthropicResponse;
 		const text = data.content.find((c) => c.type === "text")?.text;
 		if (!text) throw new Error("Anthropic returned empty content");
 		return text.trim();
+	}
+
+	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {
+		const observationText = formatObservations(observations, project);
+		return this.call(`${COMPRESSION_PROMPT}\n\n${observationText}`, 800);
+	}
+
+	async complete(prompt: string, maxTokens: number): Promise<string> {
+		return this.call(prompt, maxTokens);
 	}
 }
 
@@ -180,9 +188,7 @@ class OpenRouterProvider implements CompressionProvider {
 		);
 	}
 
-	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {
-		const observationText = formatObservations(observations, project);
-
+	private async call(content: string, maxTokens: number): Promise<string> {
 		const res = await fetch(`${this.baseUrl}/chat/completions`, {
 			method: "POST",
 			headers: {
@@ -191,21 +197,30 @@ class OpenRouterProvider implements CompressionProvider {
 			},
 			body: JSON.stringify({
 				model: this.model,
-				max_tokens: 800,
-				messages: [{ role: "user", content: `${COMPRESSION_PROMPT}\n\n${observationText}` }],
+				max_tokens: maxTokens,
+				messages: [{ role: "user", content }],
 			}),
 			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
 		});
 
 		if (!res.ok) {
 			const body = await res.text();
-			throw new Error(`OpenRouter compression failed (${res.status}): ${body}`);
+			throw new Error(`OpenRouter call failed (${res.status}): ${body}`);
 		}
 
 		const data = (await res.json()) as ChatCompletionResponse;
 		const text = data.choices?.[0]?.message?.content;
 		if (!text) throw new Error("OpenRouter returned empty content");
 		return text.trim();
+	}
+
+	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {
+		const observationText = formatObservations(observations, project);
+		return this.call(`${COMPRESSION_PROMPT}\n\n${observationText}`, 800);
+	}
+
+	async complete(prompt: string, maxTokens: number): Promise<string> {
+		return this.call(prompt, maxTokens);
 	}
 }
 
@@ -228,29 +243,36 @@ class OllamaProvider implements CompressionProvider {
 		return getConfigWithEnv("compression_model", "HUSK_COMPRESSION_MODEL") ?? "llama3.2";
 	}
 
-	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {
-		const observationText = formatObservations(observations, project);
-
+	private async call(content: string): Promise<string> {
 		const res = await fetch(`${this.url}/api/chat`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				model: this.model,
 				stream: false,
-				messages: [{ role: "user", content: `${COMPRESSION_PROMPT}\n\n${observationText}` }],
+				messages: [{ role: "user", content }],
 			}),
 			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
 		});
 
 		if (!res.ok) {
 			const body = await res.text();
-			throw new Error(`Ollama compression failed (${res.status}): ${body}`);
+			throw new Error(`Ollama call failed (${res.status}): ${body}`);
 		}
 
 		const data = (await res.json()) as OllamaChatResponse;
 		const text = data.message?.content;
 		if (!text) throw new Error("Ollama returned empty content");
 		return text.trim();
+	}
+
+	async summarize(observations: ObservationRow[], project: string | null): Promise<string> {
+		const observationText = formatObservations(observations, project);
+		return this.call(`${COMPRESSION_PROMPT}\n\n${observationText}`);
+	}
+
+	async complete(prompt: string, _maxTokens: number): Promise<string> {
+		return this.call(prompt);
 	}
 }
 
@@ -321,6 +343,106 @@ export function getCompressionProvider(): CompressionProvider {
 
 export function setCompressionProvider(p: CompressionProvider | null): void {
 	provider = p;
+}
+
+// --- Memory classification ---
+
+import { MEMORY_TYPES, type MemoryType, generateUniqueSlug, isValidMemoryType } from "./db.js";
+
+const CLASSIFICATION_PROMPT = `Classify the following memory content. Respond with ONLY a valid JSON object, no markdown fences.
+
+Fields:
+- "title": A concise title, max 60 characters
+- "memory_type": One of: decision, solution, lesson, fact, convention, goal
+- "path": A hierarchical category path like "auth/" or "api/rate-limits/" (lowercase, max 3 segments, trailing slash). Use "" if uncategorizable.
+
+Memory content:
+`;
+
+export interface MemoryClassification {
+	title: string;
+	slug: string;
+	memory_type: MemoryType;
+	path: string;
+}
+
+export function slugify(text: string): string {
+	const slug = text
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 80);
+	return slug || "memory";
+}
+
+interface ClassificationResponse {
+	title?: string;
+	memory_type?: string;
+	path?: string;
+}
+
+export async function classifyMemory(
+	summary: string,
+	scope: string,
+	gitRemote: string | null,
+	opts?: { title?: string; memoryType?: string; path?: string },
+): Promise<MemoryClassification> {
+	const needsLlm = !opts?.title || !opts?.memoryType;
+
+	let title = opts?.title ?? null;
+	const rawType = opts?.memoryType ?? "";
+	let memoryType: MemoryType = isValidMemoryType(rawType) ? rawType : "fact";
+	let path = opts?.path ?? "";
+
+	// Session-scoped memories skip LLM classification
+	if (scope === "session") {
+		title = title ?? summary.slice(0, 60);
+		const slug = slugify(title);
+		return {
+			title,
+			slug: generateUniqueSlug(scope, gitRemote, slug),
+			memory_type: memoryType,
+			path,
+		};
+	}
+
+	if (needsLlm) {
+		try {
+			const compressionProvider = getCompressionProvider();
+			const raw = await compressionProvider.complete(
+				`${CLASSIFICATION_PROMPT}${summary.slice(0, 2000)}`,
+				200,
+			);
+
+			// Strip markdown fences if present
+			const jsonStr = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+			const parsed = JSON.parse(jsonStr) as ClassificationResponse;
+
+			if (!title && parsed.title && typeof parsed.title === "string") {
+				title = parsed.title.slice(0, 60);
+			}
+			if (!opts?.memoryType && parsed.memory_type && isValidMemoryType(parsed.memory_type)) {
+				memoryType = parsed.memory_type as MemoryType;
+			}
+			if (!opts?.path && parsed.path && typeof parsed.path === "string") {
+				path = parsed.path.slice(0, 100);
+			}
+		} catch (err) {
+			log.warn("Memory classification failed, using defaults: {error}", {
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+
+	title = title ?? summary.slice(0, 60);
+	const slug = slugify(title);
+
+	return {
+		title,
+		slug: generateUniqueSlug(scope, gitRemote, slug),
+		memory_type: memoryType,
+		path,
+	};
 }
 
 // --- Config helpers ---

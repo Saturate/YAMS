@@ -23,6 +23,8 @@ import {
 	getWorkspaceForUser,
 	listApiKeys,
 	listDistinctGitRemotes,
+	listDistinctMemoryTypes,
+	listDistinctPaths,
 	listDistinctScopes,
 	listMemories,
 	listObservations,
@@ -30,8 +32,10 @@ import {
 	listWorkspaceProjects,
 	listWorkspaces,
 	removeProjectFromWorkspace,
+	restoreMemory,
 	setConfig,
 	setUserSetting,
+	softDeleteMemory,
 	updateWorkspace,
 } from "./db.js";
 import { getProvider } from "./embeddings.js";
@@ -74,7 +78,9 @@ admin.get("/filters", (c) => {
 	const userId = isAdmin ? undefined : c.get("userId");
 	const projects = listDistinctGitRemotes(userId);
 	const scopes = listDistinctScopes(userId);
-	return c.json({ projects, scopes });
+	const types = listDistinctMemoryTypes(userId);
+	const paths = listDistinctPaths(userId);
+	return c.json({ projects, scopes, types, paths });
 });
 
 // --- Search ---
@@ -132,23 +138,36 @@ admin.post("/search", async (c) => {
 admin.get("/memories", (c) => {
 	const gitRemote = c.req.query("git_remote");
 	const scope = c.req.query("scope");
+	const memoryType = c.req.query("memory_type");
+	const path = c.req.query("path");
 	const limit = Math.min(Math.max(Number(c.req.query("limit")) || 50, 1), 200);
 	const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
 	const isAdmin = c.get("role") === "admin";
+	// Only admins can view soft-deleted memories
+	const includeDeleted = isAdmin && c.req.query("include_deleted") === "true";
 	const userId = isAdmin ? undefined : c.get("userId");
 
-	const memories = listMemories({ gitRemote, scope, limit, offset, userId });
-	const total = countMemories({ gitRemote, scope, userId });
+	const memories = listMemories({
+		gitRemote,
+		scope,
+		memoryType,
+		path,
+		includeDeleted,
+		limit,
+		offset,
+		userId,
+	});
+	const total = countMemories({ gitRemote, scope, memoryType, includeDeleted, userId });
 
 	return c.json({ memories, total });
 });
 
-admin.delete("/memories/:id", async (c) => {
+admin.delete("/memories/:id", (c) => {
 	const id = c.req.param("id");
 
 	if (c.get("role") !== "admin") {
 		const userDb = new UserScope(c.get("userId"));
-		if (!userDb.deleteMemory(id)) {
+		if (!userDb.softDeleteMemory(id)) {
 			return c.json({ error: "Memory not found." }, 404);
 		}
 	} else {
@@ -156,19 +175,27 @@ admin.delete("/memories/:id", async (c) => {
 		if (!memory) {
 			return c.json({ error: "Memory not found." }, 404);
 		}
-		deleteMemory(id);
+		softDeleteMemory(id);
 	}
 
-	try {
-		await getStorageProvider().delete(id);
-	} catch (err) {
-		log.warn("Vector delete failed for {id}: {error}", {
-			id,
-			error: err instanceof Error ? err.message : String(err),
-		});
+	return c.json({ id, soft_deleted: true });
+});
+
+admin.post("/memories/:id/restore", (c) => {
+	const id = c.req.param("id");
+
+	if (c.get("role") !== "admin") {
+		const userDb = new UserScope(c.get("userId"));
+		if (!userDb.restoreMemory(id)) {
+			return c.json({ error: "Memory not found or not deleted." }, 404);
+		}
+	} else {
+		if (!restoreMemory(id)) {
+			return c.json({ error: "Memory not found or not deleted." }, 404);
+		}
 	}
 
-	return c.json({ id, deleted: true });
+	return c.json({ id, restored: true });
 });
 
 // --- Sessions ---

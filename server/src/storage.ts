@@ -20,6 +20,7 @@ export interface MemoryFilter {
 	scope?: string;
 	user_id?: string;
 	workspace_id?: string;
+	memory_type?: string;
 }
 
 export interface VectorSearchResult {

@@ -341,8 +341,9 @@ describe("MCP server", () => {
 
 		expect(data.result?.isError).toBeUndefined();
 		const text = data.result?.content?.[0]?.text;
-		const parsed = JSON.parse(text ?? "{}") as { id: string; deleted: boolean };
-		expect(parsed.deleted).toBe(true);
+		const parsed = JSON.parse(text ?? "{}") as { id: string; soft_deleted: boolean };
+		expect(parsed.soft_deleted).toBe(true);
+		// Soft-deleted memories are excluded from active queries
 		expect(getMemory(id)).toBeUndefined();
 	});
 

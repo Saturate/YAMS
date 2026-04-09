@@ -7,6 +7,7 @@ import type { ValidatedApiKey } from "./auth.js";
 import { validateBearerKey } from "./auth.js";
 import { parseSummary } from "./compression.js";
 import {
+	MEMORY_TYPES,
 	UserScope,
 	countObservations,
 	getRecentSessionSummaries,
@@ -79,6 +80,10 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					.describe("Filter by scope"),
 				project: z.string().optional().describe("Filter by git remote / project"),
 				workspace: z.string().optional().describe("Filter by workspace name or ID"),
+				type: z
+					.enum(MEMORY_TYPES)
+					.optional()
+					.describe("Filter by memory type (decision/solution/lesson/fact/convention/goal)"),
 				limit: z.number().int().min(1).max(50).optional().describe("Max results (default 10)"),
 				max_tokens: z
 					.number()
@@ -121,7 +126,11 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 				}
 
 				const now = new Date().toISOString();
-				const filterExpired = (results: { score: number; payload: Record<string, unknown> }[]) =>
+				// Filter results that have expired based on payload TTL.
+				// Soft-deleted memories may still appear until the retention
+				// sweep hard-purges them (default 30 days). This is by design:
+				// vectors are kept for instant restore capability.
+				const filterActive = (results: { score: number; payload: Record<string, unknown> }[]) =>
 					results.filter((r) => {
 						const expiresAt = r.payload?.expires_at;
 						return !expiresAt || String(expiresAt) > now;
@@ -154,10 +163,11 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 								scope: tier.scope,
 								user_id: apiKey.user_id,
 								workspace_id: tier.workspace_id,
+								memory_type: args.type,
 							},
 							20,
 						);
-						for (const r of filterExpired(results)) {
+						for (const r of filterActive(results)) {
 							const id = String(r.payload.memory_id ?? r.payload.id ?? "");
 							if (id && seen.has(id)) continue;
 							if (id) seen.add(id);
@@ -183,11 +193,12 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 							scope: args.scope,
 							user_id: apiKey.user_id,
 							workspace_id: args.scope === "workspace" ? workspaceId : undefined,
+							memory_type: args.type,
 						},
 						fetchLimit,
 					);
 
-					memories = filterExpired(results).map((r) => ({
+					memories = filterActive(results).map((r) => ({
 						score: r.score,
 						...(r.payload ?? {}),
 					}));
@@ -224,7 +235,7 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 		"remember",
 		{
 			description:
-				"Store a new memory. Checks for duplicates — if a similar memory exists, returns it instead of storing. Use force to skip the check, or replace to overwrite an existing memory. Cost: embedding call + vector search + DB write, no LLM.",
+				"Store a new memory. Auto-classifies with title, type, and path. Checks for duplicates — if a similar memory exists, returns it instead of storing. Use force to skip the check, or replace to overwrite an existing memory. Cost: embedding call + vector search + DB write + optional LLM classification.",
 			inputSchema: {
 				content: z.string().describe("The content to remember"),
 				scope: z
@@ -245,6 +256,20 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					.describe(
 						"TTL in seconds. 0 or omitted = scope default (session: 90d, all others: forever). Admin can set HUSK_TTL_MAX to cap all TTLs.",
 					),
+				title: z
+					.string()
+					.max(60)
+					.optional()
+					.describe("Override auto-generated title (max 60 chars)"),
+				type: z
+					.enum(MEMORY_TYPES)
+					.optional()
+					.describe("Override auto-generated type (decision/solution/lesson/fact/convention/goal)"),
+				path: z
+					.string()
+					.max(100)
+					.optional()
+					.describe("Tree path for organization, e.g. 'auth/' or 'api/rate-limits/'"),
 			},
 		},
 		async (args) => {
@@ -267,6 +292,9 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 					replace: args.replace,
 					ttl: args.ttl,
 					workspaceId,
+					title: args.title,
+					memoryType: args.type,
+					path: args.path,
 				});
 
 				if (isDuplicate(result)) {
@@ -318,42 +346,58 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 		"forget",
 		{
 			description:
-				"Delete a memory by ID. Use search first to find memory IDs. Cost: DB write + vector delete, no LLM.",
+				"Soft-delete a memory by ID. The memory can be restored within 30 days. Use search first to find memory IDs. Cost: DB write only, no LLM.",
 			inputSchema: {
-				id: z.string().describe("The memory ID to delete (returned by search)"),
+				id: z.string().describe("The memory ID to soft-delete (returned by search)"),
 			},
 		},
-		async (args) => {
-			if (!db.deleteMemory(args.id)) {
+		(args) => {
+			if (!db.softDeleteMemory(args.id)) {
 				return {
 					isError: true,
 					content: [{ type: "text" as const, text: "Memory not found." }],
 				};
 			}
 
-			try {
-				await getStorageProvider().delete(args.id);
-			} catch (err) {
-				log.warn("Vector delete failed for {id}: {error}", {
-					id: args.id,
-					error: err instanceof Error ? err.message : String(err),
-				});
-			}
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify({
+							id: args.id,
+							soft_deleted: true,
+							restore_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+						}),
+					},
+				],
+			};
+		},
+	);
 
-			const graphProvider = getGraphProviderOrNull();
-			if (graphProvider) {
-				try {
-					await graphProvider.removeEdgesForMemory(args.id);
-				} catch (err) {
-					log.warn("Graph edge cleanup failed for {id}: {error}", {
-						id: args.id,
-						error: err instanceof Error ? err.message : String(err),
-					});
-				}
+	server.registerTool(
+		"restore",
+		{
+			description:
+				"Restore a soft-deleted memory by ID. Only works within the 30-day grace period. Cost: DB write only, no LLM.",
+			inputSchema: {
+				id: z.string().describe("The memory ID to restore"),
+			},
+		},
+		(args) => {
+			if (!db.restoreMemory(args.id)) {
+				return {
+					isError: true,
+					content: [{ type: "text" as const, text: "Memory not found or not deleted." }],
+				};
 			}
 
 			return {
-				content: [{ type: "text" as const, text: JSON.stringify({ id: args.id, deleted: true }) }],
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify({ id: args.id, restored: true }),
+					},
+				],
 			};
 		},
 	);
@@ -380,13 +424,19 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 		"list_memories",
 		{
 			description:
-				"List all memories, optionally filtered by project and/or scope. Returns full memory objects with IDs. Use for auditing, cleanup, or bulk review. Cost: DB read only, no LLM.",
+				"List all memories, optionally filtered by project, scope, type, or path. Returns full memory objects with IDs. Use for auditing, cleanup, or bulk review. Cost: DB read only, no LLM.",
 			inputSchema: {
 				project: z.string().optional().describe("Filter by git remote / project"),
 				scope: z
 					.enum(["session", "project", "workspace", "global"])
 					.optional()
 					.describe("Filter by scope"),
+				type: z.enum(MEMORY_TYPES).optional().describe("Filter by memory type"),
+				path: z.string().optional().describe("Filter by path prefix (e.g. 'auth/')"),
+				include_deleted: z
+					.boolean()
+					.optional()
+					.describe("Include soft-deleted memories (default false)"),
 				limit: z.number().int().min(1).max(200).optional().describe("Max results (default 50)"),
 				offset: z.number().int().min(0).optional().describe("Pagination offset (default 0)"),
 			},
@@ -397,12 +447,17 @@ function createMcpServer(apiKey: ValidatedApiKey): McpServer {
 			const memories = db.listMemories({
 				gitRemote: args.project,
 				scope: args.scope,
+				memoryType: args.type,
+				path: args.path,
+				includeDeleted: args.include_deleted,
 				limit,
 				offset,
 			});
 			const total = db.countMemories({
 				gitRemote: args.project,
 				scope: args.scope,
+				memoryType: args.type,
+				includeDeleted: args.include_deleted,
 			});
 
 			return {

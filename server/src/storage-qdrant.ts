@@ -55,6 +55,9 @@ export class QdrantStorageProvider implements StorageProvider {
 		if (filter?.workspace_id) {
 			must.push({ key: "workspace_id", match: { value: filter.workspace_id } });
 		}
+		if (filter?.memory_type) {
+			must.push({ key: "memory_type", match: { value: filter.memory_type } });
+		}
 
 		const results = await client.search(COLLECTION_NAME, {
 			vector,

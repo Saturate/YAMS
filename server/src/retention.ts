@@ -1,5 +1,10 @@
 import { getLogger } from "@logtape/logtape";
-import { deleteMemoriesBatch, getExpiredMemoryIds } from "./db.js";
+import {
+	deleteMemoriesBatch,
+	getConfigWithEnv,
+	getExpiredMemoryIds,
+	getSoftDeletedMemoryIds,
+} from "./db.js";
 import { getGraphProviderOrNull } from "./graph.js";
 import { getStorageProvider } from "./storage.js";
 
@@ -68,6 +73,58 @@ export async function sweepExpiredMemories(): Promise<number> {
 	// If batch was full, there might be more — schedule another pass
 	if (ids.length === BATCH_SIZE) {
 		const more = await sweepExpiredMemories();
+		return ids.length + more;
+	}
+
+	// Hard-purge soft-deleted memories past grace period
+	const purged = await purgeSoftDeletedMemories();
+	return ids.length + purged;
+}
+
+const DEFAULT_SOFT_DELETE_GRACE_DAYS = 30;
+
+async function purgeSoftDeletedMemories(): Promise<number> {
+	const graceDaysStr = getConfigWithEnv("soft_delete_grace_days", "HUSK_SOFT_DELETE_GRACE_DAYS");
+	const graceDays = graceDaysStr
+		? Math.max(Number(graceDaysStr), 1)
+		: DEFAULT_SOFT_DELETE_GRACE_DAYS;
+
+	const ids = getSoftDeletedMemoryIds(graceDays, BATCH_SIZE);
+	if (ids.length === 0) return 0;
+
+	deleteMemoriesBatch(ids);
+
+	const graphProvider = getGraphProviderOrNull();
+
+	for (const id of ids) {
+		try {
+			await getStorageProvider().delete(id);
+		} catch (err) {
+			log.warn("Vector delete failed for purged memory {id}: {error}", {
+				id,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+
+		if (graphProvider) {
+			try {
+				await graphProvider.removeEdgesForMemory(id);
+			} catch (err) {
+				log.warn("Graph edge cleanup failed for purged memory {id}: {error}", {
+					id,
+					error: err instanceof Error ? err.message : String(err),
+				});
+			}
+		}
+	}
+
+	log.info("Purged {count} soft-deleted memories (grace: {days}d)", {
+		count: ids.length,
+		days: graceDays,
+	});
+
+	if (ids.length === BATCH_SIZE) {
+		const more = await purgeSoftDeletedMemories();
 		return ids.length + more;
 	}
 
